@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { DEPTH_LABELS } from '@/types/roadmap';
 import { GeneratedRoadmap } from '@/types/roadmap';
 import { roadmapStats } from '@/utils/roadmapProgress';
@@ -10,10 +10,18 @@ import { ProgressBar } from '@/components/ProgressBar';
 interface Props {
   roadmap: GeneratedRoadmap;
   onContinue: () => void;
+  continueLoading?: boolean;
+  continueDisabled?: boolean;
 }
 
-export function RoadmapHeader({ roadmap, onContinue }: Props) {
+export function RoadmapHeader({
+  roadmap,
+  onContinue,
+  continueLoading = false,
+  continueDisabled = false,
+}: Props) {
   const { completed, total, pct, remainingMinutes } = roadmapStats(roadmap);
+  const disabled = continueDisabled || continueLoading;
 
   return (
     <View style={styles.wrap}>
@@ -43,10 +51,21 @@ export function RoadmapHeader({ roadmap, onContinue }: Props) {
         </Text>
       </View>
 
-      <Pressable onPress={onContinue} style={styles.continueBtn}>
-        <Text style={styles.continueText}>Continue</Text>
-        <Ionicons name="arrow-forward" size={18} color={colors.bg} />
+      <Pressable
+        onPress={onContinue}
+        disabled={disabled}
+        style={[styles.continueBtn, disabled && styles.continueBtnDisabled]}
+      >
+        {continueLoading ? (
+          <ActivityIndicator color={colors.bg} size="small" />
+        ) : (
+          <>
+            <Text style={styles.continueText}>Continue</Text>
+            <Ionicons name="arrow-forward" size={18} color={colors.bg} />
+          </>
+        )}
       </Pressable>
+      {continueLoading ? <Text style={styles.loadingHint}>Opening…</Text> : null}
     </View>
   );
 }
@@ -109,10 +128,17 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radius.pill,
     marginTop: spacing.md,
+    minHeight: 48,
   },
+  continueBtnDisabled: { opacity: 0.65 },
   continueText: {
     color: colors.bg,
     fontSize: font.size.md,
     fontWeight: font.weight.heavy as '800',
+  },
+  loadingHint: {
+    color: colors.textFaint,
+    fontSize: font.size.xs,
+    textAlign: 'center',
   },
 });

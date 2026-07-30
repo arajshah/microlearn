@@ -10,6 +10,7 @@ import { ChallengeProvider } from '@/context/ChallengeContext';
 import { BookmarksProvider } from '@/context/BookmarksContext';
 import { PreferencesProvider } from '@/context/PreferencesContext';
 import { RoadmapProvider } from '@/context/RoadmapContext';
+import { LegacyCleanupBootstrap } from '@/components/LegacyCleanupBootstrap';
 import { colors } from '@/theme/theme';
 
 export default function RootLayout() {
@@ -23,6 +24,7 @@ export default function RootLayout() {
               <BookmarksProvider>
                 <LibraryProvider>
                   <RoadmapProvider>
+                  <LegacyCleanupBootstrap />
                   <StatusBar style="light" />
                   <Stack
                     screenOptions={{
@@ -40,6 +42,10 @@ export default function RootLayout() {
                     <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
                     <Stack.Screen
                       name="review"
+                      options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+                    />
+                    <Stack.Screen
+                      name="retrieve-session"
                       options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
                     />
                     <Stack.Screen

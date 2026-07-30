@@ -38,4 +38,17 @@ export interface LessonBlueprint {
   nextLessonConnection?: string;
   estimatedMinutes: number;
   createdAt: string;
+  /** Content Engine v2 pedagogy metadata (optional). */
+  coreMentalModel?: string;
+  formalDefinition?: string;
+  notation?: { symbol: string; meaning: string }[];
+  workedExamplePlan?: string;
+  misconceptionTargets?: string[];
+  visualModel?: string;
+  practiceCheck?: string;
+  prerequisiteRecallNote?: string;
+  nextBridge?: string;
+  conceptTags?: string[];
+  skillTags?: string[];
+  prerequisiteConcepts?: string[];
 }

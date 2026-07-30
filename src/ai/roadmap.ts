@@ -21,10 +21,18 @@ function log(msg: string, detail?: unknown) {
   console.log(`[Roadmap AI] ${msg}`, detail ?? '');
 }
 
-function depthSpec(depth: RoadmapDepth) {
-  if (depth === 'quick') return { units: [2, 3], lessons: [8, 12] };
-  if (depth === 'deep') return { units: [6, 9], lessons: [28, 45] };
-  return { units: [4, 6], lessons: [16, 25] };
+function depthUnitRange(lessonCount: number): [number, number] {
+  const units = Math.max(2, Math.min(8, Math.ceil(lessonCount / 3)));
+  return [Math.max(2, units - 1), units + 1];
+}
+
+function validateLessonCount(input: GenerateRoadmapInput, actual: number): string[] {
+  const target = input.lessonCount;
+  const tolerance = Math.max(2, Math.round(target * 0.2));
+  if (actual < target - tolerance || actual > target + tolerance) {
+    return [`Expected ~${target} lessons, got ${actual}`];
+  }
+  return [];
 }
 
 const SYSTEM_PROMPT = `You are an expert curriculum designer building structured learning roadmaps for a microlearning app.
@@ -94,18 +102,19 @@ When a lesson extends beyond the source, note that implicitly in lesson descript
 
 function buildUserPrompt(input: GenerateRoadmapInput): string {
   const tier = getMasteryTier(input.masteryLevel);
-  const spec = depthSpec(input.depth);
+  const unitRange = depthUnitRange(input.lessonCount);
   const sourceBlock = input.sourceContext ? formatSourceBlock(input.sourceContext) : '';
   return `Create a learning roadmap.
 
 Topic: "${input.topic.trim()}"
 Goal: "${input.goal.trim()}"
 Starting mastery: Level ${tier.level} — ${tier.name} (${tier.tagline})
-Depth: ${input.depth} (${spec.units[0]}-${spec.units[1]} units, ${spec.lessons[0]}-${spec.lessons[1]} lessons total)
+Depth: ${input.depth}
+Target size: ${input.lessonCount} lessons total (${unitRange[0]}-${unitRange[1]} units), each lesson designed for ${input.slidesPerLesson} slides when generated later.
 ${input.preferences?.trim() ? `Preferences: ${input.preferences.trim()}` : ''}
 ${sourceBlock}
 
-Target the goal with clear units and ordered lessons. Assign lesson ids l1, l2, l3… globally in learning order.`;
+Target exactly ${input.lessonCount} lessons. Assign lesson ids l1, l2, l3… globally in learning order.`;
 }
 
 function buildRepairPrompt(input: GenerateRoadmapInput, errors: string[]): string {
@@ -191,18 +200,16 @@ interface RawUnit {
 }
 
 function validateDepthCounts(
-  depth: RoadmapDepth,
+  input: GenerateRoadmapInput,
   unitCount: number,
   lessonCount: number,
 ): string[] {
-  const spec = depthSpec(depth);
+  const unitRange = depthUnitRange(input.lessonCount);
   const errors: string[] = [];
-  if (unitCount < spec.units[0] || unitCount > spec.units[1] + 1) {
-    errors.push(`Expected ${spec.units[0]}-${spec.units[1]} units, got ${unitCount}`);
+  if (unitCount < unitRange[0] || unitCount > unitRange[1] + 1) {
+    errors.push(`Expected ${unitRange[0]}-${unitRange[1]} units, got ${unitCount}`);
   }
-  if (lessonCount < spec.lessons[0] - 2 || lessonCount > spec.lessons[1] + 5) {
-    errors.push(`Expected ~${spec.lessons[0]}-${spec.lessons[1]} lessons, got ${lessonCount}`);
-  }
+  errors.push(...validateLessonCount(input, lessonCount));
   return errors;
 }
 
@@ -369,7 +376,7 @@ function normalizeAndValidate(
   }
 
   errors.push(
-    ...validateDepthCounts(input.depth, remappedUnits.length, flatLessons.length),
+    ...validateDepthCounts(input, remappedUnits.length, flatLessons.length),
   );
 
   const estimatedTotalMinutes =
@@ -384,6 +391,8 @@ function normalizeAndValidate(
     description,
     masteryLevel: input.masteryLevel,
     depth: input.depth,
+    targetLessonCount: input.lessonCount,
+    slidesPerLesson: input.slidesPerLesson,
     preferences: input.preferences?.trim() || undefined,
     estimatedTotalMinutes,
     createdAt: new Date().toISOString(),

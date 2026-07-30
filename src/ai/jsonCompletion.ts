@@ -7,6 +7,17 @@ interface ChatMessage {
   content: string;
 }
 
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+
+export interface JsonCompletionOptions {
+  jsonMode?: boolean;
+  retryWithoutJsonMode?: boolean;
+  generationMode?: string;
+  chunkIndex?: number;
+  maxAttempts?: number;
+}
+
 async function postChat(
   config: AiConfig,
   messages: ChatMessage[],
@@ -49,7 +60,52 @@ function throwForStatus(status: number, detail: string): never {
   if (status === 429) {
     throw new AiError('Rate limited (429). Wait and try again.');
   }
+  if (RETRYABLE_STATUSES.has(status)) {
+    throw new AiError(`AI provider error (${status}).${detail ? ` ${detail}` : ''}`);
+  }
   throw new AiError(`Request failed (${status}).${detail ? ` ${detail}` : ''}`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function isRetryableProviderStatus(status: number): boolean {
+  return RETRYABLE_STATUSES.has(status);
+}
+
+export function calculateRetryBackoffMs(attempt: number, jitter = Math.random()): number {
+  const safeAttempt = Math.max(1, attempt);
+  const base = 1000 * 2 ** (safeAttempt - 1);
+  const jitterMs = Math.floor(Math.max(0, Math.min(1, jitter)) * 350);
+  return base + jitterMs;
+}
+
+export function isGemmaGoogleProvider(config: AiConfig): boolean {
+  return (
+    config.baseUrl.toLowerCase().includes('generativelanguage.googleapis.com') &&
+    config.model.toLowerCase().includes('gemma')
+  );
+}
+
+function logProviderFailure(args: {
+  config: AiConfig;
+  status: number;
+  jsonMode: boolean;
+  maxTokens: number;
+  generationMode?: string;
+  chunkIndex?: number;
+  detail?: string;
+}): void {
+  console.warn('[AI] provider failed', {
+    model: args.config.model,
+    status: args.status,
+    jsonMode: args.jsonMode,
+    maxTokens: args.maxTokens,
+    generationMode: args.generationMode,
+    chunkIndex: args.chunkIndex,
+    detail: args.detail?.slice(0, 180),
+  });
 }
 
 /** Shared JSON completion helper for roadmap and other structured AI outputs. */
@@ -58,6 +114,7 @@ export async function requestJsonCompletion(
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
+  options: JsonCompletionOptions = {},
 ): Promise<string> {
   if (!config.apiKey) throw new AiError('Add your API key in Settings first.');
   if (!config.baseUrl) throw new AiError('Set a provider base URL in Settings.');
@@ -68,29 +125,71 @@ export async function requestJsonCompletion(
     { role: 'user', content: userPrompt },
   ];
 
-  let res: Response;
-  try {
-    res = await postChat(config, messages, { json: true, maxTokens });
-    if (res.status === 400) {
-      res = await postChat(config, messages, { json: false, maxTokens });
+  let lastStatus = 0;
+  let lastDetail = '';
+
+  const maxAttempts = options.maxAttempts ?? MAX_ATTEMPTS;
+  let useJsonMode = options.jsonMode ?? true;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let res: Response;
+    try {
+      res = await postChat(config, messages, { json: useJsonMode, maxTokens });
+      if (res.status === 400) {
+        res = await postChat(config, messages, { json: false, maxTokens });
+        useJsonMode = false;
+      }
+    } catch {
+      if (attempt < maxAttempts) {
+        await sleep(400 * attempt);
+        continue;
+      }
+      throw new AiError('Network error. Check your connection and base URL.');
     }
-  } catch {
-    throw new AiError('Network error. Check your connection and base URL.');
+
+    if (!res.ok) {
+      lastStatus = res.status;
+      lastDetail = await readError(res);
+      logProviderFailure({
+        config,
+        status: res.status,
+        jsonMode: useJsonMode,
+        maxTokens,
+        generationMode: options.generationMode,
+        chunkIndex: options.chunkIndex,
+        detail: lastDetail,
+      });
+      if (
+        isRetryableProviderStatus(res.status) &&
+        options.retryWithoutJsonMode &&
+        useJsonMode
+      ) {
+        useJsonMode = false;
+      }
+      if (isRetryableProviderStatus(res.status) && attempt < maxAttempts) {
+        console.warn('[ai] retrying after provider error', res.status, attempt);
+        await sleep(calculateRetryBackoffMs(attempt));
+        continue;
+      }
+      throwForStatus(res.status, lastDetail);
+    }
+
+    let data: { choices?: Array<{ message?: { content?: string }; text?: string }> };
+    try {
+      data = await res.json();
+    } catch {
+      throw new AiError('The provider returned an unreadable response.');
+    }
+
+    const choice = data?.choices?.[0];
+    const content = stripReasoningWrappers(
+      (choice?.message?.content ?? choice?.text ?? '').trim(),
+    );
+    if (!content) throw new AiError('The model returned an empty response. Try again.');
+    return content;
   }
 
-  if (!res.ok) throwForStatus(res.status, await readError(res));
-
-  let data: { choices?: Array<{ message?: { content?: string }; text?: string }> };
-  try {
-    data = await res.json();
-  } catch {
-    throw new AiError('The provider returned an unreadable response.');
-  }
-
-  const choice = data?.choices?.[0];
-  const content = stripReasoningWrappers(
-    (choice?.message?.content ?? choice?.text ?? '').trim(),
+  throw new AiError(
+    `The AI provider failed (${lastStatus || 'unknown'}).${lastDetail ? ` ${lastDetail}` : ''} Try again.`,
   );
-  if (!content) throw new AiError('The model returned an empty response. Try again.');
-  return content;
 }

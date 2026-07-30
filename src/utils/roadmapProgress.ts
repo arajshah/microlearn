@@ -47,13 +47,21 @@ export function roadmapStats(roadmap: GeneratedRoadmap) {
   };
 }
 
-/** First active node, else first available incomplete, else undefined. */
+/** First active node, else first available incomplete, with status recalculation. */
 export function continueNode(roadmap: GeneratedRoadmap): RoadmapLessonNode | undefined {
-  const lessons = allRoadmapLessons(roadmap);
+  const recalculated = recalculateRoadmapStatuses(roadmap);
+  const lessons = allRoadmapLessons(recalculated);
+  const byStatus = (status: RoadmapNodeStatus) => lessons.find((l) => l.status === status);
   return (
-    lessons.find((l) => l.status === 'active') ??
-    lessons.find((l) => l.status === 'available') ??
-    lessons.find((l) => l.status === 'error')
+    byStatus('active') ??
+    byStatus('available') ??
+    byStatus('error') ??
+    lessons.find(
+      (l) =>
+        l.status !== 'completed' &&
+        l.status !== 'locked' &&
+        l.status !== 'generating',
+    )
   );
 }
 

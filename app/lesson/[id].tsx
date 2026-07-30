@@ -25,7 +25,21 @@ import { useReview } from '@/context/ReviewContext';
 import { useBookmarks } from '@/context/BookmarksContext';
 import { makeItemId } from '@/srs/scheduler';
 import { cardToTutorContext } from '@/utils/tutorContext';
+import { createReviewSetFromLesson, isServerConfigured } from '@/services/microlearnServer';
+import {
+  LessonTelemetryContext,
+  trackCardAnswered,
+  trackCardViewed,
+  trackLessonCompleted,
+  trackLessonStarted,
+} from '@/services/learningTelemetry';
 import { colors, font, radius, spacing } from '@/theme/theme';
+import { GeneratedLesson } from '@/types/content';
+
+function firstParam(value: unknown): string | undefined {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : undefined;
+  return typeof value === 'string' ? value : undefined;
+}
 
 export default function LessonPlayer() {
   const { id, roadmapId, nodeId } = useLocalSearchParams<{
@@ -55,13 +69,49 @@ export default function LessonPlayer() {
   const [earnedXp, setEarnedXp] = useState(0);
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorKeyboardUp, setTutorKeyboardUp] = useState(false);
+  const [scheduleStatus, setScheduleStatus] = useState<
+    'idle' | 'scheduling' | 'scheduled' | 'error' | 'unavailable'
+  >('idle');
+  const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
 
   const fade = useRef(new Animated.Value(1)).current;
+  const generatedLesson = useMemo(() => getGenerated(id ?? ''), [id, getGenerated]);
+  const cardShownAt = useRef<number>(Date.now());
 
-  // Stop any narration when moving between cards.
+  const telemetry = useMemo<LessonTelemetryContext | null>(() => {
+    if (!location) return null;
+    const meta = location.lesson as unknown as Record<string, unknown>;
+    return {
+      lessonId: location.lesson.id,
+      lessonTitle: location.lesson.title,
+      roadmapId: firstParam(roadmapId) ?? (typeof meta.roadmapId === 'string' ? meta.roadmapId : undefined),
+      lessonNodeId:
+        firstParam(nodeId) ?? (typeof meta.roadmapNodeId === 'string' ? meta.roadmapNodeId : undefined),
+      lessonConceptTags: location.lesson.conceptTags,
+      lessonSkillTags: location.lesson.skillTags,
+    };
+  }, [location, roadmapId, nodeId]);
+
+  // Stop any narration when moving between slides.
   useEffect(() => {
     stop();
   }, [index, stop]);
+
+  useEffect(() => {
+    if (!telemetry || !location) return;
+    trackLessonStarted(telemetry, location.lesson.cards.length);
+    // Only the lesson identity should retrigger a lesson_started event.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry?.lessonId]);
+
+  useEffect(() => {
+    if (!telemetry || !location) return;
+    const current = location.lesson.cards[index];
+    if (!current) return;
+    cardShownAt.current = Date.now();
+    trackCardViewed(telemetry, current, index);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telemetry?.lessonId, index]);
 
   const tutorContext = useMemo(() => {
     if (!location) return undefined;
@@ -112,6 +162,14 @@ export default function LessonPlayer() {
       correct: isCorrect,
       selected: optionIndex,
     });
+    if (telemetry) {
+      trackCardAnswered(telemetry, card, {
+        correct: isCorrect,
+        selectedAnswer: optionIndex,
+        expectedAnswer: (card as { answerIndex?: number }).answerIndex,
+        responseTimeMs: Date.now() - cardShownAt.current,
+      });
+    }
     if (isCorrect) {
       setCorrectCount((c) => c + 1);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
@@ -136,9 +194,14 @@ export default function LessonPlayer() {
       correct: correctCount,
       total: totalQuestions,
     });
-    const gen = getGenerated(lesson.id);
-    const rmId = roadmapId ?? gen?.roadmapId;
-    const nId = nodeId ?? gen?.roadmapNodeId;
+    const lessonMeta = lesson as unknown as Record<string, unknown>;
+    const lessonRoadmapId = typeof lessonMeta.roadmapId === 'string' ? lessonMeta.roadmapId : undefined;
+    const lessonNodeId = typeof lessonMeta.roadmapNodeId === 'string' ? lessonMeta.roadmapNodeId : undefined;
+    const gen = generatedLesson ?? (lessonRoadmapId && lessonNodeId
+      ? (lesson as unknown as GeneratedLesson)
+      : undefined);
+    const rmId = firstParam(roadmapId) ?? gen?.roadmapId ?? lessonRoadmapId;
+    const nId = firstParam(nodeId) ?? gen?.roadmapNodeId ?? lessonNodeId;
     if (rmId && nId && gen) {
       const roadmap = getRoadmapById(rmId);
       const objective =
@@ -156,6 +219,13 @@ export default function LessonPlayer() {
       await onRoadmapLessonCompleted(rmId, nId, outcome);
     } else if (rmId && nId) {
       await onRoadmapLessonCompleted(rmId, nId);
+    }
+    if (telemetry) {
+      trackLessonCompleted(telemetry, {
+        correctCount,
+        totalCount: totalQuestions,
+        accuracy: totalQuestions > 0 ? Number((correctCount / totalQuestions).toFixed(4)) : 0,
+      });
     }
     setEarnedXp(xp);
     setFinished(true);
@@ -176,7 +246,48 @@ export default function LessonPlayer() {
     });
   };
 
+  const goBack = () => {
+    if (index <= 0) return;
+    animateTo(() => {
+      setIndex((i) => i - 1);
+      setSelected(null);
+      setRevealed(false);
+    });
+  };
+
   const canContinue = !isQuestion || revealed;
+  const canGoBack = index > 0;
+  const isLastSlide = index >= cards.length - 1;
+  const completionRoadmapId = firstParam(roadmapId) ?? generatedLesson?.roadmapId;
+  const completionNodeId = firstParam(nodeId) ?? generatedLesson?.roadmapNodeId;
+  const isRoadmapGeneratedLesson = Boolean(completionRoadmapId && completionNodeId);
+
+  const scheduleRetrieval = async () => {
+    if (!generatedLesson || scheduleStatus === 'scheduling') return;
+    if (!isServerConfigured()) {
+      setScheduleStatus('unavailable');
+      setScheduleMessage('Connect the local server to add this lesson to review.');
+      return;
+    }
+    setScheduleStatus('scheduling');
+    setScheduleMessage(null);
+    const result = await createReviewSetFromLesson({
+      lessonId: generatedLesson.id,
+      roadmapId: completionRoadmapId ?? generatedLesson.roadmapId,
+      lessonNodeId: completionNodeId ?? generatedLesson.roadmapNodeId,
+      lesson: generatedLesson,
+    });
+    if (result.ok && (result.reviewSet || (result.items?.length ?? 0) > 0)) {
+      setScheduleStatus('scheduled');
+      setScheduleMessage(result.existing && result.existing > 0 ? 'Already in review' : 'Added to review');
+    } else if (result.ok && result.totalCandidates === 0) {
+      setScheduleStatus('error');
+      setScheduleMessage('No review prompts could be created from this lesson.');
+    } else {
+      setScheduleStatus('error');
+      setScheduleMessage(result.errorMessage ?? 'Could not add to review. Try again.');
+    }
+  };
 
   if (finished) {
     return (
@@ -187,6 +298,13 @@ export default function LessonPlayer() {
         xp={earnedXp}
         correct={correctCount}
         total={totalQuestions}
+        canSchedule={Boolean(generatedLesson)}
+        scheduleStatus={scheduleStatus}
+        scheduleMessage={scheduleMessage}
+        scheduleLabel={
+          isRoadmapGeneratedLesson ? 'Add lesson to review' : 'Add to review'
+        }
+        onSchedule={scheduleRetrieval}
         onDone={() => router.back()}
       />
     );
@@ -208,7 +326,7 @@ export default function LessonPlayer() {
           />
         </View>
         <Text style={styles.counter}>
-          {index + 1}/{cards.length}
+          {index + 1} of {cards.length}
         </Text>
         <Pressable
           onPress={() => (speaking ? stop() : speak(cardToSpeech(card)))}
@@ -296,30 +414,45 @@ export default function LessonPlayer() {
         {isQuestion && revealed ? (
           <Explanation card={card} correct={wasCardCorrect(card, selected)} />
         ) : null}
-        <Pressable
-          disabled={!canContinue}
-          onPress={advance}
-          style={[
-            styles.cta,
-            { backgroundColor: canContinue ? subject.accent : colors.surfaceAlt },
-          ]}
-        >
-          <Text
+        <View style={styles.navRow}>
+          {canGoBack ? (
+            <Pressable onPress={goBack} style={[styles.navBtn, styles.navBtnBack]}>
+              <Ionicons name="arrow-back" size={18} color={colors.text} />
+              <Text style={styles.navBtnBackText}>Back</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.navBtnPlaceholder} />
+          )}
+          <Pressable
+            disabled={!canContinue}
+            onPress={advance}
             style={[
-              styles.ctaText,
-              { color: canContinue ? colors.bg : colors.textFaint },
+              styles.navBtn,
+              styles.navBtnForward,
+              { backgroundColor: canContinue ? subject.accent : colors.surfaceAlt },
             ]}
           >
-            {index >= cards.length - 1
-              ? 'Finish lesson'
-              : isQuestion && !revealed
-                ? 'Select an answer'
-                : 'Continue'}
-          </Text>
-          {canContinue ? (
-            <Ionicons name="arrow-forward" size={18} color={colors.bg} />
-          ) : null}
-        </Pressable>
+            <Text
+              style={[
+                styles.navBtnForwardText,
+                { color: canContinue ? colors.bg : colors.textFaint },
+              ]}
+            >
+              {isLastSlide
+                ? 'Finish lesson'
+                : isQuestion && !revealed
+                  ? 'Select an answer'
+                  : 'Forward'}
+            </Text>
+            {canContinue ? (
+              <Ionicons
+                name={isLastSlide ? 'checkmark' : 'arrow-forward'}
+                size={18}
+                color={colors.bg}
+              />
+            ) : null}
+          </Pressable>
+        </View>
       </View>
       ) : null}
     </View>
@@ -335,6 +468,11 @@ function CompletionScreen({
   xp,
   correct,
   total,
+  canSchedule,
+  scheduleStatus,
+  scheduleMessage,
+  scheduleLabel,
+  onSchedule,
   onDone,
 }: {
   subjectGradient: [string, string];
@@ -343,6 +481,11 @@ function CompletionScreen({
   xp: number;
   correct: number;
   total: number;
+  canSchedule: boolean;
+  scheduleStatus: 'idle' | 'scheduling' | 'scheduled' | 'error' | 'unavailable';
+  scheduleMessage: string | null;
+  scheduleLabel: string;
+  onSchedule: () => void;
   onDone: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -359,7 +502,9 @@ function CompletionScreen({
         <Ionicons name="trophy" size={56} color={colors.white} />
       </View>
       <Text style={styles.completionTitle}>Lesson complete!</Text>
-      <Text style={styles.completionLesson}>{lessonTitle}</Text>
+      <Text style={styles.completionLesson} numberOfLines={2}>
+        {lessonTitle}
+      </Text>
 
       <View style={styles.statRow}>
         <View style={styles.statBox}>
@@ -378,12 +523,45 @@ function CompletionScreen({
         </View>
       </View>
 
-      <Pressable
-        onPress={onDone}
-        style={[styles.completionBtn, { marginBottom: insets.bottom + spacing.md }]}
-      >
-        <Text style={styles.completionBtnText}>Continue</Text>
-      </Pressable>
+      {canSchedule ? (
+        <View style={styles.scheduleBox}>
+          <Text style={styles.scheduleTitle}>Schedule recall practice</Text>
+          <Text style={styles.scheduleText}>
+            Review prompts will appear in Retrieve when due.
+          </Text>
+          <Pressable
+            onPress={onSchedule}
+            disabled={scheduleStatus === 'scheduling' || scheduleStatus === 'scheduled'}
+            style={[
+              styles.scheduleBtn,
+              scheduleStatus === 'scheduled' && styles.scheduleBtnDone,
+            ]}
+          >
+            <Ionicons
+              name={scheduleStatus === 'scheduled' ? 'checkmark-circle' : 'calendar-outline'}
+              size={17}
+              color={colors.bg}
+            />
+            <Text style={styles.scheduleBtnText} numberOfLines={1}>
+              {scheduleStatus === 'scheduling'
+                ? 'Adding…'
+                : scheduleStatus === 'scheduled'
+                  ? scheduleMessage ?? 'Added to review'
+                  : scheduleLabel}
+            </Text>
+          </Pressable>
+          {scheduleStatus === 'error' || scheduleStatus === 'unavailable' ? (
+            <Text style={styles.scheduleError}>{scheduleMessage}</Text>
+          ) : null}
+        </View>
+      ) : null}
+
+        <Pressable
+          onPress={onDone}
+          style={[styles.completionBtn, { marginBottom: insets.bottom + spacing.md }]}
+        >
+          <Text style={styles.completionBtnText}>Done</Text>
+        </Pressable>
     </LinearGradient>
   );
 }
@@ -444,7 +622,13 @@ const styles = StyleSheet.create({
     borderTopColor: colors.borderSoft,
     backgroundColor: colors.bg,
   },
-  cta: {
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  navBtnPlaceholder: { width: 96 },
+  navBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -452,7 +636,22 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
     borderRadius: radius.md,
   },
-  ctaText: {
+  navBtnBack: {
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minWidth: 96,
+  },
+  navBtnBackText: {
+    color: colors.text,
+    fontSize: font.size.md,
+    fontWeight: font.weight.heavy as '800',
+  },
+  navBtnForward: {
+    flex: 1,
+  },
+  navBtnForwardText: {
     fontSize: font.size.md,
     fontWeight: font.weight.heavy as '800',
   },
@@ -485,6 +684,7 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
+    minWidth: 0,
     backgroundColor: 'rgba(255,255,255,0.18)',
     borderRadius: radius.md,
     padding: spacing.lg,
@@ -500,6 +700,52 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
     fontSize: font.size.xs,
     fontWeight: font.weight.semibold as '600',
+    textAlign: 'center',
+  },
+  scheduleBox: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginTop: spacing.xl,
+    gap: spacing.sm,
+  },
+  scheduleTitle: {
+    color: colors.white,
+    fontSize: font.size.md,
+    fontWeight: font.weight.heavy as '800',
+  },
+  scheduleText: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: font.size.sm,
+    lineHeight: 20,
+  },
+  scheduleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.white,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+  },
+  scheduleBtnDone: {
+    backgroundColor: colors.success,
+  },
+  scheduleBtnText: {
+    color: colors.bg,
+    fontSize: font.size.sm,
+    fontWeight: font.weight.heavy as '800',
+    flexShrink: 1,
+  },
+  scheduleError: {
+    color: colors.white,
+    fontSize: font.size.xs,
+    lineHeight: 17,
   },
   completionBtn: {
     backgroundColor: colors.white,

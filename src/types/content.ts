@@ -9,9 +9,21 @@ export type SubjectId =
 
 export type DifficultyTrack = 'beginner' | 'intermediate' | 'advanced';
 
-/** Optional stable id for roadmap lesson cards (outcome tracking). */
+export type CognitiveLevel = 'recall' | 'understand' | 'apply' | 'analyze' | 'synthesize';
+
+export type EstimatedDifficulty = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * Optional stable id plus adaptive-learning metadata for lesson cards.
+ * All fields are optional so lessons generated before Adaptive Learning v1 stay valid.
+ */
 export interface CardIdentity {
   id?: string;
+  conceptTags?: string[];
+  skillTags?: string[];
+  weaknessTags?: string[];
+  cognitiveLevel?: CognitiveLevel;
+  estimatedDifficulty?: EstimatedDifficulty;
 }
 
 export interface ConceptCard extends CardIdentity {
@@ -150,6 +162,85 @@ export interface PredictionCard extends CardIdentity {
   explanation: string;
 }
 
+/** Content Engine v2 — structured pedagogy cards. */
+export interface FormulaNotation {
+  symbol: string;
+  meaning: string;
+}
+
+export interface FormulaCard extends CardIdentity {
+  type: 'formula';
+  title: string;
+  formula: string;
+  plainEnglish: string;
+  notation?: FormulaNotation[];
+  body?: string;
+}
+
+export interface DerivationStep {
+  label?: string;
+  expression?: string;
+  explanation: string;
+}
+
+export interface DerivationCard extends CardIdentity {
+  type: 'derivation';
+  title: string;
+  setup: string;
+  steps: DerivationStep[];
+  conclusion: string;
+}
+
+export interface WorkedExampleStep {
+  label?: string;
+  work?: string;
+  explanation: string;
+}
+
+export interface WorkedExampleCard extends CardIdentity {
+  type: 'worked_example';
+  title: string;
+  problem: string;
+  steps: WorkedExampleStep[];
+  answer: string;
+  insight: string;
+}
+
+export interface MisconceptionCheckCard extends CardIdentity {
+  type: 'misconception_check';
+  misconception: string;
+  question: string;
+  options: string[];
+  answerIndex: number;
+  explanation: string;
+}
+
+export interface CompareContrastPoint {
+  left: string;
+  right: string;
+}
+
+export interface CompareContrastCard extends CardIdentity {
+  type: 'compare_contrast';
+  title: string;
+  leftLabel: string;
+  rightLabel: string;
+  points: CompareContrastPoint[];
+  takeaway: string;
+}
+
+import type { LessonDiagram } from '@/types/diagram';
+
+export interface VisualModelCard extends CardIdentity {
+  type: 'visual_model';
+  title: string;
+  visualDescription: string;
+  /** Structured diagram spec — preferred over prose visualDescription. */
+  diagram?: LessonDiagram;
+  body: string;
+  takeaway: string;
+}
+
 export type LessonCard =
   | ConceptCard
   | QuoteCard
@@ -168,7 +259,13 @@ export type LessonCard =
   | ApplicationCard
   | SummaryCard
   | NextConnectionCard
-  | PredictionCard;
+  | PredictionCard
+  | FormulaCard
+  | DerivationCard
+  | WorkedExampleCard
+  | MisconceptionCheckCard
+  | CompareContrastCard
+  | VisualModelCard;
 
 /** Gradable cards that can feed SRS / scoring. */
 export type GradedCard =
@@ -178,6 +275,7 @@ export type GradedCard =
   | MatchingCard
   | OrderingCard
   | MisconceptionCard
+  | MisconceptionCheckCard
   | ApplicationCard
   | PredictionCard;
 
@@ -196,6 +294,17 @@ export interface Lesson {
   subtitle: string;
   minutes: number;
   cards: LessonCard[];
+  /** Adaptive Learning v1 — optional lesson-level concept metadata. */
+  conceptTags?: string[];
+  skillTags?: string[];
+  prerequisiteConcepts?: string[];
+}
+
+export interface LessonGenerationMetadata {
+  mode?: 'light' | 'rich' | 'heavy' | 'expert';
+  planningFallbackUsed?: boolean;
+  chunkFallbackIndexes?: number[];
+  warnings?: string[];
 }
 
 export interface Unit {
@@ -235,6 +344,7 @@ export interface GeneratedLesson extends Lesson {
   model?: string;
   sourceUrl?: string;
   sourceTitle?: string;
+  generationMetadata?: LessonGenerationMetadata;
 }
 
 export interface AiConfig {

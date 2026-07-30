@@ -46,6 +46,11 @@ server/dist/
 server/data/*.db
 server/data/*.db-shm
 server/data/*.db-wal
+server/backups/*.json
+server/backups/*.db
+server/backups/*.db-shm
+server/backups/*.db-wal
+server/uploads/
 
 # generated native folders
 /ios

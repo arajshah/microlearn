@@ -3,16 +3,19 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { ServerConfig } from './config';
 import { logger } from './logger';
+import { runMigrations } from './db/migrations';
+import { initGamification } from './gamification/gamificationService';
 
 export type Db = Database.Database;
 
-/** Ensures the data directory exists, opens/creates the SQLite database, and applies the minimal schema. */
+/** Ensures the data directory exists, opens/creates the SQLite database, and applies schema + migrations. */
 export function initDatabase(config: ServerConfig): Db {
   const dir = path.dirname(config.dbPath);
   fs.mkdirSync(dir, { recursive: true });
 
   const db = new Database(config.dbPath);
   db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_metadata (
@@ -23,6 +26,8 @@ export function initDatabase(config: ServerConfig): Db {
   `);
 
   setMetadata(db, 'server_started_at', new Date().toISOString());
+  runMigrations(db);
+  initGamification(db);
 
   logger.info('SQLite database ready', { path: config.dbPath });
   return db;

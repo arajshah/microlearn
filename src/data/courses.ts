@@ -1,123 +1,25 @@
-import { MasteryLevel } from '@/data/mastery';
-import { DifficultyTrack, Lesson, Subject, SubjectId, Unit } from '@/types/content';
-import { countGradedCards } from '@/utils/cards';
-import { economics } from './economics';
-import { philosophy } from './philosophy';
-import { literature } from './literature';
-import { computerScience } from './computerScience';
-import { history } from './history';
-import { psychology } from './psychology';
-import { mathematics } from './mathematics';
+export { subjects, getSubject, subjectProgressFromCompleted } from '@/data/subjects';
+export { lessonXp } from '@/utils/lessonXp';
 
-export const subjects: Subject[] = [
-  economics,
-  philosophy,
-  literature,
-  computerScience,
-  history,
-  psychology,
-  mathematics,
-];
-
-const TRACKS: DifficultyTrack[] = ['beginner', 'intermediate', 'advanced'];
-
-/** Fill in difficulty + prerequisites for units that omit them. */
-export function normalizedUnits(subject: Subject): Unit[] {
-  return subject.units.map((unit, i) => {
-    const difficulty = unit.difficulty ?? TRACKS[Math.min(i, TRACKS.length - 1)];
-    const prerequisites =
-      unit.prerequisites ??
-      (i > 0 ? [subject.units[i - 1].id] : undefined);
-    return { ...unit, difficulty, prerequisites };
-  });
+/** @deprecated Static built-in lessons removed. Always returns empty. */
+export function allLessons(): never[] {
+  return [];
 }
 
-export function isUnitUnlocked(
-  unit: Unit,
-  subject: Subject,
-  isLessonComplete: (id: string) => boolean,
-): boolean {
-  const prereqs = unit.prerequisites ?? [];
-  if (prereqs.length === 0) return true;
-  for (const unitId of prereqs) {
-    const prereqUnit = subject.units.find((u) => u.id === unitId);
-    if (!prereqUnit) continue;
-    const allDone = prereqUnit.lessons.every((l) => isLessonComplete(l.id));
-    if (!allDone) return false;
-  }
-  return true;
-}
-
-export function unitsForTrack(subject: Subject, track: DifficultyTrack | 'all'): Unit[] {
-  const units = normalizedUnits(subject);
-  if (track === 'all') return units;
-  return units.filter((u) => u.difficulty === track);
-}
-
-/** Filter units by learner mastery level (cumulative path). */
-export function unitsForMastery(subject: Subject, level: MasteryLevel | 'all'): Unit[] {
-  const units = normalizedUnits(subject);
-  if (level === 'all') return units;
-  return units.filter((u) => {
-    const d = u.difficulty ?? 'beginner';
-    if (level <= 2) return d === 'beginner';
-    if (level === 3) return d === 'beginner' || d === 'intermediate';
-    return true;
-  });
-}
-
-export function getSubject(id: SubjectId | string): Subject | undefined {
-  return subjects.find((s) => s.id === id);
-}
-
-export interface LessonLocation {
-  subject: Subject;
-  unit: Unit;
-  lesson: Lesson;
-  subjectLessonIndex: number;
-}
-
-export function findLesson(lessonId: string): LessonLocation | undefined {
-  for (const subject of subjects) {
-    let idx = 0;
-    for (const unit of subject.units) {
-      for (const lesson of unit.lessons) {
-        if (lesson.id === lessonId) {
-          return { subject, unit, lesson, subjectLessonIndex: idx };
-        }
-        idx++;
-      }
-    }
-  }
+/** @deprecated Static built-in lessons removed. */
+export function findLesson(_lessonId: string): undefined {
   return undefined;
 }
 
-export function allLessons(): LessonLocation[] {
-  const out: LessonLocation[] = [];
-  for (const subject of subjects) {
-    let idx = 0;
-    for (const unit of subject.units) {
-      for (const lesson of unit.lessons) {
-        out.push({ subject, unit, lesson, subjectLessonIndex: idx });
-        idx++;
-      }
-    }
-  }
-  return out;
+/** @deprecated Static built-in lessons removed. */
+export function subjectLessons(): never[] {
+  return [];
 }
 
-export function subjectLessons(subject: Subject): Lesson[] {
-  return subject.units.flatMap((u) => u.lessons);
-}
+export const totalLessonCount = 0;
 
-export function lessonXp(lesson: Lesson): number {
-  return 10 + countGradedCards(lesson.cards) * 5;
-}
-
-export const totalLessonCount = allLessons().length;
-
-export const TRACK_LABELS: Record<DifficultyTrack, string> = {
+export const TRACK_LABELS = {
   beginner: 'Foundations',
   intermediate: 'Core',
   advanced: 'Advanced',
-};
+} as const;

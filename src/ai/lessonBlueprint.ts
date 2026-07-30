@@ -37,8 +37,22 @@ Schema:
   "summaryPoints": string[] (2-4 concise points),
   "previousLessonConnection": string (optional),
   "nextLessonConnection": string (optional),
-  "estimatedMinutes": number (3-8)
+  "estimatedMinutes": number (3-8),
+  "coreMentalModel": string (optional — one-sentence mental model),
+  "formalDefinition": string (optional),
+  "notation": [{ "symbol": string, "meaning": string }] (optional),
+  "workedExamplePlan": string (optional),
+  "misconceptionTargets": string[] (optional),
+  "visualModel": string (optional — describe a diagram learners should picture),
+  "practiceCheck": string (optional),
+  "nextBridge": string (optional),
+  "conceptTags": string[] (optional),
+  "skillTags": string[] (optional),
+  "prerequisiteConcepts": string[] (optional)
 }
+
+conceptTags and prerequisiteConcepts must be lowercase-hyphenated slugs (e.g. "gradient-descent").
+Reuse the same slug across lessons that teach the same concept so mastery tracking aggregates.
 
 Rules:
 - Exactly ONE primaryObjective — do not list multiple objectives.

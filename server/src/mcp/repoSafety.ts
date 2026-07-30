@@ -12,7 +12,25 @@ export type ToolErrorCode =
   | 'NOT_FOUND'
   | 'NOT_A_FILE'
   | 'NOT_A_DIRECTORY'
-  | 'INVALID_INPUT';
+  | 'INVALID_INPUT'
+  | 'WRITE_TOOLS_DISABLED'
+  | 'GIT_PUSH_DISABLED'
+  | 'FILE_EXISTS'
+  | 'CONFIRMATION_REQUIRED'
+  | 'COMMAND_NOT_ALLOWED'
+  | 'PATCH_FAILED'
+  | 'NO_TEST_SCRIPT'
+  | 'TIMEOUT'
+  | 'EMPTY_COMMIT'
+  | 'NOTHING_STAGED'
+  | 'INVALID_BRANCH_NAME'
+  | 'COMMAND_FAILED'
+  | 'ROADMAP_NOT_EDITABLE'
+  | 'UNIT_NOT_EMPTY'
+  | 'LESSON_HAS_DEPENDENTS'
+  | 'VALIDATION_FAILED'
+  | 'ROLLBACK_UNSUPPORTED_SCOPE'
+  | 'SOURCE_NOT_READY';
 
 /** Error type carrying a stable code for tool responses. */
 export class ToolError extends Error {

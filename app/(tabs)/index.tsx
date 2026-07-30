@@ -1,60 +1,98 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { MonthlyStreakCalendar } from '@/components/gamification/MonthlyStreakCalendar';
+import { ProgressBar } from '@/components/ProgressBar';
 import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SubjectCard } from '@/components/SubjectCard';
-import { ProgressRing } from '@/components/ProgressRing';
+  AppScreen,
+  BadgePill,
+  EmptyState,
+  GlassCard,
+  PrimaryButton,
+  SectionHeader,
+} from '@/components/ui';
 import { DAILY_GOAL_XP, useProgress } from '@/context/ProgressContext';
-import { useReview } from '@/context/ReviewContext';
 import { useChallenge } from '@/context/ChallengeContext';
-import { RoadmapContinueCard } from '@/components/roadmap/RoadmapContinueCard';
 import { useRoadmaps } from '@/context/RoadmapContext';
 import { usePreferences } from '@/context/PreferencesContext';
-import { allLessons, subjects } from '@/data/courses';
-import { colors, font, radius, shadow, spacing } from '@/theme/theme';
-import { greeting } from '@/utils/date';
+import { useLibrary } from '@/context/LibraryContext';
+import { countDueReviewGroups } from '@/retrieval/reviewGroups';
+import { getSubject } from '@/data/subjects';
+import { colors, font, gradients, radius, shadow, spacing } from '@/theme/theme';
+import { dayKey, greeting } from '@/utils/date';
+import { continueNode, roadmapStats } from '@/utils/roadmapProgress';
+import {
+  getDailyActivity,
+  getDueRetrievalItems,
+  getProfileSummary,
+  isServerConfigured,
+  ServerDailyActivity,
+  ServerProfileSummary,
+} from '@/services/microlearnServer';
+import {
+  filterRetrievalItems,
+  readDeletedRetrievalItemIds,
+  readDeletedReviewSetIds,
+} from '@/storage/retrievalTombstones';
 
-function QuickAction({
-  icon,
-  label,
-  tint,
-  onPress,
-  badge,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  tint: string;
-  onPress: () => void;
-  badge?: string;
-}) {
+function isActivityDay(day: ServerDailyActivity): boolean {
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.quickAction, pressed && { opacity: 0.85 }]}
-    >
-      <View style={[styles.quickIcon, { backgroundColor: `${tint}22` }]}>
-        <Ionicons name={icon} size={20} color={tint} />
-        {badge ? (
-          <View style={[styles.quickBadge, { backgroundColor: tint }]}>
-            <Text style={styles.quickBadgeText}>{badge}</Text>
-          </View>
-        ) : null}
-      </View>
-      <Text style={styles.quickLabel}>{label}</Text>
-    </Pressable>
+    day.xpEarned > 0 ||
+    day.lessonsCompleted > 0 ||
+    day.retrievalItemsReviewed > 0 ||
+    day.roadmapProgressEvents > 0
   );
 }
 
+function MetricCard({
+  label,
+  value,
+  helper,
+  icon,
+  accent,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  helper: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  accent: string;
+  onPress?: () => void;
+}) {
+  const content = (
+    <>
+      <View style={[styles.metricIcon, { backgroundColor: `${accent}1F` }]}>
+        <Ionicons name={icon} size={15} color={accent} />
+      </View>
+      <Text style={styles.metricLabel} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text style={styles.metricValue} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={styles.metricHelper} numberOfLines={1}>
+        {helper}
+      </Text>
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [styles.metricCard, pressed && { opacity: 0.86 }]}
+      >
+        {content}
+      </Pressable>
+    );
+  }
+
+  return <View style={styles.metricCard}>{content}</View>;
+}
+
 export default function TodayScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const {
     streak,
@@ -62,176 +100,297 @@ export default function TodayScreen() {
     todayXp,
     goalPct,
     completedCount,
-    totalLessons,
     isLessonComplete,
     hydrated,
+    xpByDay,
   } = useProgress();
-  const { stats: reviewStats } = useReview();
   const { isDoneToday: challengeDone } = useChallenge();
-  const { onboarded, hydrated: prefsHydrated, interests } = usePreferences();
+  const { onboarded, hydrated: prefsHydrated } = usePreferences();
   const { hydrated: roadmapsHydrated, lastOpenedRoadmap } = useRoadmaps();
+  const { generatedLessons } = useLibrary();
+
+  const serverEnabled = isServerConfigured();
+  const [serverSummary, setServerSummary] = useState<ServerProfileSummary | null>(null);
+  const [dueGroupCount, setDueGroupCount] = useState(0);
+  const [serverActivity, setServerActivity] = useState<ServerDailyActivity[]>([]);
+
+  const monthDate = useMemo(() => new Date(), []);
+
+  useEffect(() => {
+    if (!serverEnabled) return;
+    let cancelled = false;
+    (async () => {
+      const [summary, deletedReviewSets, deletedItems, dueItems, activity] = await Promise.all([
+        getProfileSummary(),
+        readDeletedReviewSetIds(),
+        readDeletedRetrievalItemIds(),
+        getDueRetrievalItems({ limit: 200 }),
+        getDailyActivity(35),
+      ]);
+      if (!cancelled) {
+        setServerSummary(summary);
+        const filtered = filterRetrievalItems(dueItems, deletedReviewSets, deletedItems);
+        setDueGroupCount(countDueReviewGroups(filtered));
+        setServerActivity(activity);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [serverEnabled]);
 
   useEffect(() => {
     if (prefsHydrated && !onboarded) router.replace('/onboarding');
   }, [prefsHydrated, onboarded, router]);
 
-  const orderedSubjects = useMemo(
-    () =>
-      [...subjects].sort(
-        (a, b) =>
-          (interests.includes(b.id) ? 1 : 0) - (interests.includes(a.id) ? 1 : 0),
-      ),
-    [interests],
-  );
+  const activeDays = useMemo(() => {
+    const set = new Set<string>();
+    const month = monthDate.getMonth();
+    const year = monthDate.getFullYear();
 
-  const nextLesson = useMemo(() => {
-    const all = allLessons();
-    return all.find((l) => !isLessonComplete(l.lesson.id)) ?? all[0];
-  }, [isLessonComplete]);
+    const inCurrentMonth = (key: string) => {
+      const [y, m] = key.split('-').map(Number);
+      return y === year && m - 1 === month;
+    };
+
+    for (const [key, xp] of Object.entries(xpByDay)) {
+      if (xp > 0 && inCurrentMonth(key)) set.add(key);
+    }
+
+    for (const day of serverActivity) {
+      if (day.day && isActivityDay(day) && inCurrentMonth(day.day)) {
+        set.add(day.day);
+      }
+    }
+
+    if (serverSummary?.activity.today?.day && isActivityDay(serverSummary.activity.today)) {
+      set.add(serverSummary.activity.today.day);
+    }
+
+    for (const day of serverSummary?.activity.last7Days ?? []) {
+      if (day.day && isActivityDay(day) && inCurrentMonth(day.day)) {
+        set.add(day.day);
+      }
+    }
+
+    const today = dayKey();
+    if (todayXp > 0) set.add(today);
+
+    return set;
+  }, [xpByDay, serverActivity, serverSummary, todayXp, monthDate]);
+
+  const nextGenerated = useMemo(() => {
+    for (const lesson of generatedLessons) {
+      if (isLessonComplete(lesson.id)) continue;
+      const subject = getSubject(lesson.subjectId);
+      if (subject) return { subject, lesson };
+    }
+    return undefined;
+  }, [generatedLessons, isLessonComplete]);
+
+  const roadmapNext = useMemo(() => {
+    if (!lastOpenedRoadmap) return null;
+    const stats = roadmapStats(lastOpenedRoadmap);
+    const next = continueNode(lastOpenedRoadmap);
+    const complete = stats.total > 0 && stats.completed >= stats.total;
+    return {
+      roadmap: lastOpenedRoadmap,
+      stats,
+      next,
+      complete,
+      minutes: next?.estimatedMinutes ?? Math.max(5, stats.remainingMinutes),
+    };
+  }, [lastOpenedRoadmap]);
 
   const goalMet = todayXp >= DAILY_GOAL_XP;
-  const coursePct = totalLessons ? Math.round((completedCount / totalLessons) * 100) : 0;
+  const lessonCatalogSize = generatedLessons.length;
+  const coursePct =
+    lessonCatalogSize > 0 ? Math.round((completedCount / lessonCatalogSize) * 100) : 0;
+  const displayStreak = serverSummary?.streaks.study.current ?? streak;
+  const totalDue = serverEnabled ? dueGroupCount : 0;
+  const dueMinutes = Math.max(1, Math.ceil(totalDue * 0.6));
+  const recentAchievement = serverSummary?.achievements.recent[0];
+  const showAchievementNudge = Boolean(
+    recentAchievement?.unlockedAt &&
+      Date.now() - new Date(recentAchievement.unlockedAt).getTime() < 86_400_000,
+  );
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxxl },
-      ]}
-      showsVerticalScrollIndicator={false}
-    >
+    <AppScreen scroll contentStyle={styles.content}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.greeting}>{greeting()}</Text>
-          <Text style={styles.appName}>Microlearn</Text>
+          <Text style={styles.title}>Today</Text>
         </View>
         <Pressable onPress={() => router.push('/search')} hitSlop={8} style={styles.iconBtn}>
           <Ionicons name="search" size={18} color={colors.textMuted} />
         </Pressable>
-        <Pressable onPress={() => router.push('/saved')} hitSlop={8} style={styles.iconBtn}>
-          <Ionicons name="bookmark-outline" size={18} color={colors.textMuted} />
-        </Pressable>
         <View style={styles.streakChip}>
           <Ionicons name="flame" size={16} color={colors.streak} />
-          <Text style={styles.streakText}>{streak}</Text>
+          <Text style={styles.streakText}>{displayStreak}</Text>
         </View>
       </View>
 
-      {/* Hero — continue learning */}
-      {nextLesson ? (
-        <Pressable
-          onPress={() => router.push(`/lesson/${nextLesson.lesson.id}`)}
-          style={({ pressed }) => [pressed && { transform: [{ scale: 0.985 }] }]}
+      {showAchievementNudge && recentAchievement ? (
+        <Pressable onPress={() => router.push('/profile')} style={styles.nudge}>
+          <Ionicons name="ribbon" size={18} color={colors.xp} />
+          <Text style={styles.nudgeText} numberOfLines={1}>
+            Achievement unlocked: {recentAchievement.title}
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {/* Continue Learning */}
+      {roadmapsHydrated && roadmapNext ? (
+        <LinearGradient
+          colors={gradients.paths}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroCard}
         >
-          <LinearGradient
-            colors={nextLesson.subject.gradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.heroCard}
-          >
-            <View style={styles.heroTop}>
-              <Text style={styles.heroKicker}>
-                {completedCount > 0 ? 'Continue' : 'Start here'}
-              </Text>
-              <View style={styles.heroIcon}>
-                <Ionicons name={nextLesson.subject.icon as any} size={18} color={colors.white} />
-              </View>
+          <View style={styles.heroTop}>
+            <BadgePill label="Continue Learning" icon="map" accent={colors.white} subtle={false} />
+            <View style={styles.heroIcon}>
+              <Ionicons name="map" size={20} color={colors.white} />
             </View>
-            <Text style={styles.heroTitle}>{nextLesson.lesson.title}</Text>
-            <Text style={styles.heroSub}>
-              {nextLesson.subject.title} · {nextLesson.lesson.minutes} min
+          </View>
+          <Text style={styles.heroTitle} numberOfLines={2}>
+            {roadmapNext.roadmap.title}
+          </Text>
+          <Text style={styles.heroSub} numberOfLines={2}>
+            {roadmapNext.complete
+              ? `${roadmapNext.stats.completed}/${roadmapNext.stats.total} lessons complete`
+              : roadmapNext.next
+                ? `Up next: ${roadmapNext.next.title}`
+                : roadmapNext.roadmap.topic}
+          </Text>
+          <View style={styles.heroProgressRow}>
+            <View style={styles.heroProgressTrack}>
+              <ProgressBar
+                progress={roadmapNext.stats.pct}
+                color={colors.white}
+                trackColor="rgba(255,255,255,0.25)"
+                height={6}
+              />
+            </View>
+            <Text style={styles.heroProgressText}>
+              {roadmapNext.stats.completed}/{roadmapNext.stats.total}
             </Text>
-            <View style={styles.heroCta}>
-              <Text style={styles.heroCtaText}>Open lesson</Text>
-              <Ionicons name="arrow-forward" size={16} color={colors.bg} />
+          </View>
+          {!roadmapNext.complete && roadmapNext.minutes > 0 ? (
+            <Text style={styles.heroMeta}>~{roadmapNext.minutes} min</Text>
+          ) : null}
+          <PrimaryButton
+            label={roadmapNext.complete ? 'Open path' : 'Continue'}
+            icon="arrow-forward"
+            accent={colors.white}
+            onPress={() => router.push(`/roadmap/${roadmapNext.roadmap.id}`)}
+            style={styles.heroCta}
+          />
+        </LinearGradient>
+      ) : nextGenerated ? (
+        <LinearGradient
+          colors={nextGenerated.subject.gradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroCard}
+        >
+          <View style={styles.heroTop}>
+            <BadgePill
+              label="Continue Learning"
+              icon="play"
+              accent={colors.white}
+              subtle={false}
+            />
+            <View style={styles.heroIcon}>
+              <Ionicons
+                name={nextGenerated.subject.icon as keyof typeof Ionicons.glyphMap}
+                size={20}
+                color={colors.white}
+              />
             </View>
-          </LinearGradient>
-        </Pressable>
-      ) : null}
+          </View>
+          <Text style={styles.heroTitle} numberOfLines={2}>
+            {nextGenerated.lesson.title}
+          </Text>
+          <Text style={styles.heroSub} numberOfLines={1}>
+            {nextGenerated.subject.title} · {nextGenerated.lesson.minutes} min
+          </Text>
+          <PrimaryButton
+            label="Start lesson"
+            icon="arrow-forward"
+            accent={colors.white}
+            onPress={() => router.push(`/lesson/${nextGenerated.lesson.id}`)}
+            style={styles.heroCta}
+          />
+        </LinearGradient>
+      ) : (
+        <GlassCard accent={colors.today} elevated>
+          <EmptyState
+            icon="sparkles-outline"
+            title="Start learning"
+            message="Create a lesson or roadmap to start learning."
+            actionLabel="Create"
+            onActionPress={() => router.push('/create')}
+            accent={colors.today}
+          />
+        </GlassCard>
+      )}
 
-      {roadmapsHydrated && lastOpenedRoadmap ? (
-        <RoadmapContinueCard
-          roadmap={lastOpenedRoadmap}
-          compact
-          onPress={() => router.push(`/roadmap/${lastOpenedRoadmap.id}`)}
+      {/* Streak Calendar */}
+      <View style={styles.calendarSection}>
+        <SectionHeader
+          title="Streak Calendar"
+          subtitle="Keep your learning chain alive."
         />
-      ) : null}
+        <GlassCard accent={colors.today}>
+          <MonthlyStreakCalendar
+            monthDate={monthDate}
+            activeDays={activeDays}
+            challengeDone={challengeDone}
+            onChallengePress={() => router.push('/challenge')}
+            accent={colors.today}
+          />
+        </GlassCard>
+      </View>
 
-      {/* Daily goal — compact */}
-      <View style={styles.goalRow}>
-        <ProgressRing progress={goalPct} size={72} strokeWidth={8}>
-          <Text style={styles.ringPct}>{Math.round(goalPct * 100)}%</Text>
-        </ProgressRing>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.goalTitle}>
-            {goalMet ? 'Goal complete' : 'Daily goal'}
-          </Text>
-          <Text style={styles.goalSub}>
-            {goalMet
-              ? `${todayXp} XP today · ${totalXp} total`
-              : `${todayXp} / ${DAILY_GOAL_XP} XP · ${coursePct}% of course done`}
-          </Text>
+      {/* Today Summary */}
+      <View style={styles.summarySection}>
+        <SectionHeader title="Today summary" />
+        <View style={styles.metricRow}>
+          <MetricCard
+            label="Due today"
+            value={String(totalDue)}
+            helper={totalDue > 0 ? `~${dueMinutes} min` : 'Clear'}
+            icon="refresh"
+            accent={colors.retrieve}
+            onPress={() => router.push('/retrieve')}
+          />
+          <MetricCard
+            label="Daily goal"
+            value={`${Math.round(goalPct * 100)}%`}
+            helper={goalMet ? 'Complete' : `${todayXp}/${DAILY_GOAL_XP} XP`}
+            icon="flash"
+            accent={colors.today}
+          />
+          <MetricCard
+            label="Streak"
+            value={`${displayStreak}`}
+            helper={coursePct > 0 ? `${coursePct}% learned` : `${totalXp} XP`}
+            icon="flame"
+            accent={colors.streak}
+          />
         </View>
       </View>
-
-      {/* Quick actions */}
-      <View style={styles.quickRow}>
-        <QuickAction
-          icon={challengeDone ? 'checkmark-circle' : 'trophy'}
-          label="Challenge"
-          tint={colors.warning}
-          onPress={() => router.push('/challenge')}
-        />
-        <QuickAction
-          icon="refresh"
-          label="Review"
-          tint={colors.streak}
-          badge={reviewStats.dueCount > 0 ? String(reviewStats.dueCount) : undefined}
-          onPress={() => router.push('/review')}
-        />
-        <QuickAction
-          icon="flash"
-          label="Lightning"
-          tint={colors.primary}
-          onPress={() => router.push('/lightning')}
-        />
-        <QuickAction
-          icon="sparkles"
-          label="Create"
-          tint={colors.xp}
-          onPress={() => router.push('/create')}
-        />
-      </View>
-
-      {/* Subjects — horizontal scroll */}
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>Explore</Text>
-        <Pressable onPress={() => router.push('/learn')} hitSlop={8}>
-          <Text style={styles.sectionLink}>See all</Text>
-        </Pressable>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.subjectScroll}
-      >
-        {orderedSubjects.map((s) => (
-          <View key={s.id} style={styles.subjectItem}>
-            <SubjectCard subject={s} compact />
-          </View>
-        ))}
-      </ScrollView>
 
       {!hydrated ? <Text style={styles.loading}>Loading your progress…</Text> : null}
-    </ScrollView>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.xl },
+  content: { gap: spacing.lg },
 
   header: {
     flexDirection: 'row',
@@ -243,11 +402,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.sm,
     letterSpacing: 0.3,
   },
-  appName: {
+  title: {
     color: colors.text,
     fontSize: font.size.xxxl,
     fontWeight: font.weight.heavy as '800',
-    letterSpacing: -0.5,
+    marginTop: 2,
   },
   iconBtn: {
     width: 40,
@@ -269,17 +428,35 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.borderSoft,
+    maxWidth: 92,
   },
   streakText: {
     color: colors.text,
     fontWeight: font.weight.bold as '700',
     fontSize: font.size.sm,
   },
+  nudge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: `${colors.xp}55`,
+  },
+  nudgeText: {
+    color: colors.text,
+    fontSize: font.size.sm,
+    fontWeight: font.weight.semibold as '600',
+    flex: 1,
+  },
 
   heroCard: {
     borderRadius: radius.xl,
     padding: spacing.xl,
-    gap: 4,
+    gap: spacing.sm,
     ...shadow.card,
   },
   heroTop: {
@@ -287,16 +464,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  heroKicker: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: font.size.xs,
-    fontWeight: font.weight.heavy as '800',
-    letterSpacing: 1.2,
-  },
   heroIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.sm,
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -305,110 +476,76 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: font.size.xxl,
     fontWeight: font.weight.heavy as '800',
-    marginTop: spacing.sm,
-    letterSpacing: -0.3,
+    lineHeight: 34,
   },
   heroSub: {
-    color: 'rgba(255,255,255,0.9)',
+    color: 'rgba(255,255,255,0.92)',
     fontSize: font.size.sm,
+    lineHeight: 20,
   },
-  heroCta: {
+  heroProgressRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 6,
-    backgroundColor: colors.white,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    marginTop: spacing.md,
+    gap: spacing.md,
+    marginTop: spacing.xs,
   },
-  heroCtaText: {
-    color: colors.bg,
+  heroProgressTrack: {
+    flex: 1,
+    minWidth: 0,
+  },
+  heroProgressText: {
+    color: colors.white,
+    fontSize: font.size.xs,
     fontWeight: font.weight.bold as '700',
-    fontSize: font.size.sm,
+    minWidth: 36,
+    textAlign: 'right',
   },
+  heroMeta: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: font.size.xs,
+    fontWeight: font.weight.semibold as '600',
+  },
+  heroCta: { marginTop: spacing.sm, alignSelf: 'flex-start' },
 
-  goalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.borderSoft,
-  },
-  ringPct: {
-    color: colors.text,
-    fontSize: font.size.sm,
-    fontWeight: font.weight.bold as '700',
-  },
-  goalTitle: {
-    color: colors.text,
-    fontSize: font.size.md,
-    fontWeight: font.weight.bold as '700',
-  },
-  goalSub: {
-    color: colors.textMuted,
-    fontSize: font.size.sm,
-    lineHeight: 19,
-    marginTop: 2,
-  },
+  calendarSection: { gap: spacing.md },
+  summarySection: { gap: spacing.md },
 
-  quickRow: {
+  metricRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     gap: spacing.sm,
   },
-  quickAction: { flex: 1, alignItems: 'center', gap: spacing.sm },
-  quickIcon: {
-    width: 52,
-    height: 52,
+  metricCard: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    padding: spacing.md,
+    gap: 5,
+  },
+  metricIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 2,
   },
-  quickBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  quickBadgeText: {
-    color: colors.bg,
-    fontSize: 10,
-    fontWeight: font.weight.bold as '700',
-  },
-  quickLabel: {
+  metricLabel: {
     color: colors.textMuted,
     fontSize: font.size.xs,
     fontWeight: font.weight.semibold as '600',
-    textAlign: 'center',
   },
-
-  sectionHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionTitle: {
+  metricValue: {
     color: colors.text,
-    fontSize: font.size.lg,
-    fontWeight: font.weight.bold as '700',
+    fontSize: font.size.xl,
+    fontWeight: font.weight.heavy as '800',
   },
-  sectionLink: {
-    color: colors.primary,
-    fontSize: font.size.sm,
-    fontWeight: font.weight.semibold as '600',
+  metricHelper: {
+    color: colors.textFaint,
+    fontSize: font.size.xs,
   },
-  subjectScroll: { gap: spacing.md, paddingRight: spacing.lg },
-  subjectItem: { width: 160 },
 
   loading: {
     color: colors.textFaint,

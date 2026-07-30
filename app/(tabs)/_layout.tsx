@@ -22,6 +22,7 @@ export default function TabsLayout() {
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
+          marginTop: 1,
         },
       }}
     >
@@ -35,11 +36,20 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="retrieve"
+        options={{
+          title: 'Retrieve',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="refresh-circle" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="learn"
         options={{
-          title: 'Learn',
+          title: 'Paths',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="school" size={size} color={color} />
+            <Ionicons name="map" size={size} color={color} />
           ),
         }}
       />

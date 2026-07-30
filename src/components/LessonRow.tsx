@@ -67,7 +67,7 @@ export function LessonRow({ lesson, subject, index, unlocked, isLast }: Props) {
               color={unlocked ? colors.textFaint : colors.borderSoft}
             />
             <Text style={[styles.meta, !unlocked && styles.textLocked]}>
-              {lesson.minutes} min · {lesson.cards.length} cards
+              {lesson.minutes} min · {lesson.cards.length} slides
             </Text>
             {done && result ? (
               <Text style={[styles.scoreTag, { color: subject.accent }]}>

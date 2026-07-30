@@ -19,11 +19,26 @@ export const colors = {
   dangerDark: '#3D1717',
   warning: '#FBBF24',
 
+  today: '#38BDF8',
+  retrieve: '#F59E0B',
+  paths: '#A78BFA',
+  create: '#C084FC',
+  profile: '#34D399',
+
   streak: '#FF9D42',
   xp: '#FFD166',
 
   white: '#FFFFFF',
   black: '#000000',
+} as const;
+
+export const gradients = {
+  today: ['#38BDF8', '#2563EB'],
+  retrieve: ['#F59E0B', '#EA580C'],
+  paths: ['#A78BFA', '#6366F1'],
+  create: ['#C084FC', '#7C3AED'],
+  profile: ['#34D399', '#059669'],
+  calm: ['#111827', '#0A0F1A'],
 } as const;
 
 export const spacing = {

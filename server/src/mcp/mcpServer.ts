@@ -10,6 +10,18 @@ import { TOOL_COUNT } from './toolSchemas';
 import { registerServerTools } from './tools/serverTools';
 import { registerRepoTools } from './tools/repoTools';
 import { registerGitTools } from './tools/gitTools';
+import { registerWriteTools } from './tools/writeTools';
+import { registerCommandTools } from './tools/commandTools';
+import { registerGitWriteTools } from './tools/gitWriteTools';
+import { registerCurriculumTools } from './tools/curriculumTools';
+import { registerAuditTools } from './tools/auditTools';
+import { registerBackupTools } from './tools/backupTools';
+import { registerProgressTools } from './tools/progressTools';
+import { registerControlTools } from './tools/controlTools';
+import { registerSourceTools } from './tools/sourceTools';
+import { registerRetrievalTools } from './tools/retrievalTools';
+import { registerGamificationTools } from './tools/gamificationTools';
+import { registerAdaptiveTools } from './tools/adaptiveTools';
 
 const MCP_SERVER_NAME = 'microlearn-local-mcp';
 const MCP_SERVER_VERSION = '0.1.0';
@@ -24,6 +36,18 @@ function buildMcpServer(ctx: ToolContext): McpServer {
   registerServerTools(server, ctx);
   registerRepoTools(server, ctx);
   registerGitTools(server, ctx);
+  registerWriteTools(server, ctx);
+  registerCommandTools(server, ctx);
+  registerGitWriteTools(server, ctx);
+  registerCurriculumTools(server, ctx);
+  registerAuditTools(server, ctx);
+  registerBackupTools(server, ctx);
+  registerProgressTools(server, ctx);
+  registerControlTools(server, ctx);
+  registerSourceTools(server, ctx);
+  registerRetrievalTools(server, ctx);
+  registerGamificationTools(server, ctx);
+  registerAdaptiveTools(server, ctx);
 
   return server;
 }

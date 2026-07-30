@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GeneratedRoadmap } from '@/types/roadmap';
+import { addDeletedRoadmapId, getDeletedRoadmapIds } from './tombstones';
 
 const ROADMAPS_KEY = 'microlearn.roadmaps.v1';
 const LAST_OPENED_KEY = 'microlearn.roadmaps.lastOpened.v1';
@@ -9,7 +10,8 @@ export async function getAllRoadmaps(): Promise<GeneratedRoadmap[]> {
     const raw = await AsyncStorage.getItem(ROADMAPS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const deleted = await getDeletedRoadmapIds();
+    return Array.isArray(parsed) ? parsed.filter((roadmap: GeneratedRoadmap) => !deleted.has(roadmap.id)) : [];
   } catch {
     return [];
   }
@@ -21,6 +23,8 @@ export async function getRoadmap(id: string): Promise<GeneratedRoadmap | undefin
 }
 
 export async function saveRoadmap(roadmap: GeneratedRoadmap): Promise<void> {
+  const deleted = await getDeletedRoadmapIds();
+  if (deleted.has(roadmap.id)) return;
   const all = await getAllRoadmaps();
   const idx = all.findIndex((r) => r.id === roadmap.id);
   const next =
@@ -33,6 +37,7 @@ export async function updateRoadmap(roadmap: GeneratedRoadmap): Promise<void> {
 }
 
 export async function deleteRoadmap(id: string): Promise<void> {
+  await addDeletedRoadmapId(id);
   const all = await getAllRoadmaps();
   await AsyncStorage.setItem(
     ROADMAPS_KEY,

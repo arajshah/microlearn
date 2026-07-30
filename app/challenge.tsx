@@ -2,29 +2,69 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CardContent, Explanation, isAnswerCorrect } from '@/components/CardView';
+import {
+  challengeQuestionToCard,
+  DailyChallenge,
+  getTodayChallenge,
+} from '@/challenge/challengeOfDay';
 import { useChallenge } from '@/context/ChallengeContext';
 import { useProgress } from '@/context/ProgressContext';
-import { useReview } from '@/context/ReviewContext';
-import { buildDailyChallenge } from '@/data/challenge';
+import { useLibrary } from '@/context/LibraryContext';
 import { colors, font, radius, spacing } from '@/theme/theme';
 import { dayKey } from '@/utils/date';
 
 const BASE_XP = 10;
 const XP_PER_CORRECT = 4;
 
+type ChallengeItem = {
+  id: string;
+  subjectTitle: string;
+  accent: string;
+  card: ReturnType<typeof challengeQuestionToCard>;
+};
+
 export default function ChallengeSession() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { awardXp } = useProgress();
-  const { ingestCard } = useReview();
   const { recordToday, todayResult } = useChallenge();
+  const { generatedLessons, config, hasKey } = useLibrary();
 
-  const queue = useRef(buildDailyChallenge(dayKey())).current;
+  const today = dayKey();
+  const [loading, setLoading] = useState(true);
+  const [daily, setDaily] = useState<DailyChallenge | null>(null);
+  const queueRef = useRef<ChallengeItem[]>([]);
   const alreadyDone = useRef(Boolean(todayResult)).current;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const challenge = await getTodayChallenge({
+        dayKey: today,
+        generatedLessons,
+        config,
+        hasKey,
+      });
+      if (cancelled) return;
+      const items: ChallengeItem[] = challenge.questions.map((q) => ({
+        id: q.id,
+        subjectTitle: challenge.subjectTitle,
+        accent: challenge.accent,
+        card: challengeQuestionToCard(q),
+      }));
+      queueRef.current = items;
+      setDaily(challenge);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [today, generatedLessons, config, hasKey]);
 
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -32,8 +72,20 @@ export default function ChallengeSession() {
   const [correctCount, setCorrectCount] = useState(0);
   const [finished, setFinished] = useState(false);
 
+  const queue = queueRef.current;
   const total = queue.length;
   const item = queue[index];
+
+  const topicLabel = useMemo(() => daily?.topic ?? 'Daily mix', [daily?.topic]);
+
+  if (loading) {
+    return (
+      <View style={[styles.screen, styles.center, { paddingTop: insets.top }]}>
+        <ActivityIndicator color={colors.xp} size="large" />
+        <Text style={styles.loadingText}>Preparing today&apos;s challenge…</Text>
+      </View>
+    );
+  }
 
   if (total === 0 || finished) {
     const correct = finished ? correctCount : todayResult?.correct ?? 0;
@@ -53,7 +105,6 @@ export default function ChallengeSession() {
     if (revealed) return;
     setSelected(optIndex);
     setRevealed(true);
-    ingestCard(item, isCorrect);
     if (isCorrect) {
       setCorrectCount((c) => c + 1);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -65,7 +116,6 @@ export default function ChallengeSession() {
   const advance = () => {
     if (index >= total - 1) {
       const xp = BASE_XP + correctCount * XP_PER_CORRECT;
-      // Only the first completion of the day awards XP + is recorded.
       if (!alreadyDone) {
         awardXp(xp);
         recordToday({
@@ -104,6 +154,9 @@ export default function ChallengeSession() {
         <Ionicons name="trophy" size={14} color={colors.xp} />
         <Text style={styles.kicker}>DAILY CHALLENGE · {item.subjectTitle}</Text>
       </View>
+      <Text style={styles.topicLine} numberOfLines={2}>
+        {topicLabel}
+      </Text>
 
       <ScrollView
         contentContainerStyle={styles.cardScroll}
@@ -202,6 +255,11 @@ function Summary({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
+  loadingText: {
+    color: colors.textMuted,
+    fontSize: font.size.md,
+    marginTop: spacing.lg,
+  },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -237,6 +295,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.xs,
     fontWeight: font.weight.heavy as '800',
     letterSpacing: 1,
+  },
+  topicLine: {
+    color: colors.textMuted,
+    fontSize: font.size.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    lineHeight: 20,
   },
   cardScroll: { padding: spacing.lg, paddingTop: spacing.md, flexGrow: 1 },
   footer: {

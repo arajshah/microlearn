@@ -2,31 +2,82 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ProgressBar } from '@/components/ProgressBar';
 import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { UnitList } from '@/components/UnitList';
-import { RoadmapContinueCard } from '@/components/roadmap/RoadmapContinueCard';
+  AppScreen,
+  EmptyState,
+  GlassCard,
+  PrimaryButton,
+  SectionHeader,
+} from '@/components/ui';
 import { useRoadmaps } from '@/context/RoadmapContext';
 import { usePreferences } from '@/context/PreferencesContext';
 import { useProgress } from '@/context/ProgressContext';
-import { MASTERY_TIERS, MasteryLevel } from '@/data/mastery';
-import { subjects } from '@/data/courses';
+import { subjects } from '@/data/subjects';
 import { SubjectId } from '@/types/content';
-import { roadmapStats } from '@/utils/roadmapProgress';
-import { colors, font, radius, spacing } from '@/theme/theme';
+import { continueNode, roadmapStats } from '@/utils/roadmapProgress';
+import { colors, font, gradients, radius, shadow, spacing } from '@/theme/theme';
+
+function RoadmapListCard({
+  title,
+  topic,
+  subtitle,
+  completed,
+  total,
+  pct,
+  onPress,
+  onDelete,
+}: {
+  title: string;
+  topic: string;
+  subtitle: string;
+  completed: number;
+  total: number;
+  pct: number;
+  onPress: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <View style={styles.roadmapRow}>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [styles.roadmapRowMain, pressed && { opacity: 0.92 }]}
+      >
+        <View style={styles.roadmapRowIcon}>
+          <Ionicons name="map" size={18} color={colors.paths} />
+        </View>
+        <View style={styles.roadmapRowBody}>
+          <Text style={styles.roadmapRowTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          <Text style={styles.roadmapRowTopic} numberOfLines={1}>
+            {topic}
+          </Text>
+          <Text style={styles.roadmapRowSub} numberOfLines={1}>
+            {subtitle}
+          </Text>
+          <View style={styles.roadmapRowProgress}>
+            <ProgressBar progress={pct} color={colors.paths} height={4} />
+            <Text style={styles.roadmapRowMeta}>
+              {completed} of {total} lessons
+            </Text>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+      </Pressable>
+      <Pressable onPress={onDelete} hitSlop={10} style={styles.roadmapDeleteBtn}>
+        <Ionicons name="trash-outline" size={17} color={colors.textFaint} />
+      </Pressable>
+    </View>
+  );
+}
 
 export default function LearnScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { subjectProgress } = useProgress();
   const { interests } = usePreferences();
-  const { roadmaps, hydrated: roadmapsHydrated, lastOpenedRoadmap } = useRoadmaps();
+  const { roadmaps, hydrated: roadmapsHydrated, lastOpenedRoadmap, deleteRoadmap } = useRoadmaps();
 
   const orderedSubjects = useMemo(
     () =>
@@ -37,197 +88,355 @@ export default function LearnScreen() {
     [interests],
   );
 
-  const [activeId, setActiveId] = useState<SubjectId>(subjects[0].id);
-  const [masteryFilter, setMasteryFilter] = useState<MasteryLevel | 'all'>('all');
+  const [selectedSubjectId, setSelectedSubjectId] = useState<SubjectId>(subjects[0].id);
   const pickedInitial = useRef(false);
+
   useEffect(() => {
     if (!pickedInitial.current && interests.length > 0) {
       pickedInitial.current = true;
-      setActiveId(interests[0]);
+      setSelectedSubjectId(interests[0]);
     }
   }, [interests]);
 
-  const subject = subjects.find((s) => s.id === activeId)!;
-  const { done, total, pct } = subjectProgress(subject.id);
+  const continueRoadmap = useMemo(() => {
+    if (lastOpenedRoadmap) return lastOpenedRoadmap;
+    if (roadmaps.length > 0) return roadmaps[0];
+    return null;
+  }, [lastOpenedRoadmap, roadmaps]);
+
+  const continueStats = continueRoadmap ? roadmapStats(continueRoadmap) : null;
+  const continueNext = continueRoadmap ? continueNode(continueRoadmap) : null;
+  const continueComplete =
+    continueStats !== null && continueStats.total > 0 && continueStats.completed >= continueStats.total;
+
+  const listedRoadmaps = roadmaps;
+
+  const subject = subjects.find((s) => s.id === selectedSubjectId)!;
+  const { done } = subjectProgress(subject.id);
+
+  const confirmDeleteRoadmap = (id: string, title: string) => {
+    Alert.alert('Delete roadmap?', `Remove "${title}" from your paths?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteRoadmap(id) },
+    ]);
+  };
 
   return (
-    <View style={styles.screen}>
-      <View style={[styles.topBar, { paddingTop: insets.top + spacing.md }]}>
-        <View style={styles.headingRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.heading}>Learn</Text>
-            <Text style={styles.subheading}>Pick a subject and follow the path</Text>
-          </View>
-          <Pressable
-            onPress={() => router.push('/search')}
-            hitSlop={8}
-            style={styles.searchBtn}
-          >
-            <Ionicons name="search" size={20} color={colors.textMuted} />
-          </Pressable>
+    <AppScreen scroll contentStyle={styles.content}>
+      <View style={styles.header}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.title}>Paths</Text>
+          <Text style={styles.subtitle}>Your long-term learning journeys</Text>
         </View>
+        <Pressable onPress={() => router.push('/search')} hitSlop={8} style={styles.iconBtn}>
+          <Ionicons name="search" size={18} color={colors.textMuted} />
+        </Pressable>
+        <Pressable onPress={() => router.push('/create')} hitSlop={8} style={styles.iconBtn}>
+          <Ionicons name="add" size={20} color={colors.textMuted} />
+        </Pressable>
+      </View>
 
+      <View style={styles.section}>
+        <SectionHeader title="Continue learning" />
+        {roadmapsHydrated && continueRoadmap && continueStats ? (
+          <LinearGradient
+            colors={gradients.paths}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.continueCard}
+          >
+            <Text style={styles.continueKicker}>
+              {continueComplete ? 'Path complete' : 'Up next'}
+            </Text>
+            <Text style={styles.continueTitle} numberOfLines={2}>
+              {continueRoadmap.title}
+            </Text>
+            {!continueComplete && continueNext ? (
+              <Text style={styles.continueNext} numberOfLines={1}>
+                {continueNext.title}
+              </Text>
+            ) : (
+              <Text style={styles.continueNext} numberOfLines={1}>
+                {continueRoadmap.goal}
+              </Text>
+            )}
+            <View style={styles.continueProgress}>
+              <ProgressBar
+                progress={continueStats.pct}
+                color={colors.white}
+                trackColor="rgba(255,255,255,0.25)"
+                height={6}
+              />
+              <Text style={styles.continueMeta}>
+                {continueStats.completed} of {continueStats.total} lessons
+              </Text>
+            </View>
+            <PrimaryButton
+              label={continueComplete ? 'Open path' : 'Continue'}
+              icon="arrow-forward"
+              accent={colors.white}
+              onPress={() => router.push(`/roadmap/${continueRoadmap.id}`)}
+              style={styles.continueBtn}
+            />
+          </LinearGradient>
+        ) : (
+          <GlassCard accent={colors.paths}>
+            <EmptyState
+              icon="map-outline"
+              title="No path in progress"
+              message="Create a roadmap to start a structured learning journey."
+              actionLabel="Create roadmap"
+              onActionPress={() => router.push('/create')}
+              accent={colors.paths}
+            />
+          </GlassCard>
+        )}
+      </View>
+
+      {roadmapsHydrated ? (
+        <View style={styles.section}>
+          <SectionHeader
+            title="Your roadmaps"
+            subtitle={roadmaps.length > 0 ? `${roadmaps.length} saved` : undefined}
+            actionLabel="New"
+            onActionPress={() => router.push('/create')}
+          />
+          {listedRoadmaps.length > 0 ? (
+            <View style={styles.roadmapList}>
+              {listedRoadmaps.map((rm) => {
+                const stats = roadmapStats(rm);
+                const next = continueNode(rm);
+                const complete = stats.total > 0 && stats.completed >= stats.total;
+                return (
+                  <RoadmapListCard
+                    key={rm.id}
+                    title={rm.title}
+                    topic={rm.topic}
+                    subtitle={
+                      complete ? rm.goal : next ? `Next: ${next.title}` : rm.goal
+                    }
+                    completed={stats.completed}
+                    total={stats.total}
+                    pct={stats.pct}
+                    onPress={() => router.push(`/roadmap/${rm.id}`)}
+                    onDelete={() => confirmDeleteRoadmap(rm.id, rm.title)}
+                  />
+                );
+              })}
+            </View>
+          ) : (
+            <Text style={styles.mutedNote}>
+              Create a lesson or roadmap to start learning.
+            </Text>
+          )}
+        </View>
+      ) : null}
+
+      <View style={[styles.section, styles.browseSection]}>
+        <SectionHeader
+          title="Browse subjects"
+          subtitle="Pick a category when creating lessons or roadmaps"
+        />
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chips}
         >
           {orderedSubjects.map((s) => {
-            const active = s.id === activeId;
+            const active = s.id === selectedSubjectId;
             return (
               <Pressable
                 key={s.id}
-                onPress={() => setActiveId(s.id)}
+                onPress={() => setSelectedSubjectId(s.id)}
                 style={[
                   styles.chip,
                   active && { backgroundColor: s.accent, borderColor: s.accent },
                 ]}
               >
                 <Ionicons
-                  name={s.icon as any}
+                  name={s.icon as keyof typeof Ionicons.glyphMap}
                   size={15}
                   color={active ? colors.bg : colors.textMuted}
                 />
-                <Text style={[styles.chipText, active && { color: colors.bg }]}>
-                  {s.title}
-                </Text>
+                <Text style={[styles.chipText, active && { color: colors.bg }]}>{s.title}</Text>
               </Pressable>
             );
           })}
         </ScrollView>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={[styles.chips, { paddingTop: spacing.sm }]}
-        >
-          {(['all', ...MASTERY_TIERS.map((t) => t.level)] as const).map((t) => {
-            const active = masteryFilter === t;
-            const label =
-              t === 'all'
-                ? 'All levels'
-                : `L${t} ${MASTERY_TIERS.find((x) => x.level === t)?.name ?? ''}`;
-            return (
-              <Pressable
-                key={String(t)}
-                onPress={() => setMasteryFilter(t)}
-                style={[styles.trackChip, active && styles.trackChipActive]}
-              >
-                <Text style={[styles.trackChipText, active && { color: colors.bg }]}>
-                  {label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={[styles.content, { paddingBottom: spacing.xxxl }]}
-        showsVerticalScrollIndicator={false}
-      >
-        {roadmapsHydrated && lastOpenedRoadmap ? (
-          <RoadmapContinueCard
-            roadmap={lastOpenedRoadmap}
-            onPress={() => router.push(`/roadmap/${lastOpenedRoadmap.id}`)}
+        <GlassCard accent={subject.accent}>
+          <View style={styles.subjectPreview}>
+            <View style={[styles.subjectPreviewIcon, { backgroundColor: `${subject.accent}22` }]}>
+              <Ionicons
+                name={subject.icon as keyof typeof Ionicons.glyphMap}
+                size={22}
+                color={subject.accent}
+              />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.subjectPreviewTitle}>{subject.title}</Text>
+              <Text style={styles.subjectPreviewDesc} numberOfLines={3}>
+                {subject.description}
+              </Text>
+              {done > 0 ? (
+                <Text style={styles.subjectPreviewMeta}>{done} lesson{done === 1 ? '' : 's'} completed</Text>
+              ) : null}
+            </View>
+          </View>
+          <PrimaryButton
+            label={`Create in ${subject.title}`}
+            icon="sparkles"
+            accent={subject.accent}
+            onPress={() => router.push({ pathname: '/create', params: { subjectId: subject.id } })}
+            style={styles.viewLessonsBtn}
           />
-        ) : null}
-
-        {roadmapsHydrated && roadmaps.length > 0 ? (
-          <View style={styles.roadmapsSection}>
-            <View style={styles.roadmapsHead}>
-              <Text style={styles.roadmapsTitle}>My roadmaps</Text>
-              <Pressable onPress={() => router.push('/create')} hitSlop={8}>
-                <Text style={styles.roadmapsLink}>New</Text>
-              </Pressable>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.roadmapsScroll}
-            >
-              {roadmaps.map((rm) => {
-                const stats = roadmapStats(rm);
-                return (
-                  <Pressable
-                    key={rm.id}
-                    onPress={() => router.push(`/roadmap/${rm.id}`)}
-                    style={({ pressed }) => [styles.roadmapCard, pressed && { opacity: 0.9 }]}
-                  >
-                    <Ionicons name="map" size={20} color={colors.primary} />
-                    <Text style={styles.roadmapCardTitle} numberOfLines={2}>
-                      {rm.title}
-                    </Text>
-                    <Text style={styles.roadmapCardMeta}>
-                      {stats.completed}/{stats.total} done
-                    </Text>
-                    <View style={styles.roadmapBarTrack}>
-                      <View
-                        style={[styles.roadmapBarFill, { width: `${stats.pct * 100}%` }]}
-                      />
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        ) : null}
-
-        <LinearGradient
-          colors={subject.gradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.hero}
-        >
-          <View style={styles.heroIcon}>
-            <Ionicons name={subject.icon as any} size={28} color={colors.white} />
-          </View>
-          <Text style={styles.heroTitle}>{subject.title}</Text>
-          <Text style={styles.heroDesc}>{subject.description}</Text>
-          <View style={styles.heroProgress}>
-            <View style={styles.heroBarTrack}>
-              <View style={[styles.heroBarFill, { width: `${pct * 100}%` }]} />
-            </View>
-            <Text style={styles.heroProgressText}>
-              {done}/{total}
-            </Text>
-          </View>
-        </LinearGradient>
-
-        <UnitList subject={subject} masteryLevel={masteryFilter} />
-      </ScrollView>
-    </View>
+        </GlassCard>
+      </View>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  topBar: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-    backgroundColor: colors.bg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSoft,
+  content: { gap: spacing.xl },
+
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
   },
-  headingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  searchBtn: {
-    width: 44,
-    height: 44,
+  title: {
+    color: colors.text,
+    fontSize: font.size.xxxl,
+    fontWeight: font.weight.heavy as '800',
+  },
+  subtitle: {
+    color: colors.textMuted,
+    fontSize: font.size.sm,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heading: {
-    color: colors.text,
-    fontSize: font.size.xxl,
+
+  section: { gap: spacing.md },
+
+  continueCard: {
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    gap: spacing.sm,
+    ...shadow.card,
+  },
+  continueKicker: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: font.size.xs,
+    fontWeight: font.weight.semibold as '600',
+  },
+  continueTitle: {
+    color: colors.white,
+    fontSize: font.size.xl,
     fontWeight: font.weight.heavy as '800',
   },
-  subheading: { color: colors.textMuted, fontSize: font.size.sm, marginTop: 2 },
-  chips: { gap: spacing.sm, paddingVertical: spacing.md, paddingRight: spacing.lg },
+  continueNext: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: font.size.sm,
+    lineHeight: 20,
+  },
+  continueProgress: {
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  continueMeta: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: font.size.xs,
+    fontWeight: font.weight.semibold as '600',
+  },
+  continueBtn: {
+    marginTop: spacing.md,
+    backgroundColor: colors.white,
+  },
+
+  roadmapList: { gap: spacing.sm },
+  roadmapRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    overflow: 'hidden',
+  },
+  roadmapRowMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    paddingRight: spacing.sm,
+  },
+  roadmapRowIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: `${colors.paths}18`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roadmapRowBody: { flex: 1, minWidth: 0, gap: 2 },
+  roadmapRowTitle: {
+    color: colors.text,
+    fontSize: font.size.md,
+    fontWeight: font.weight.bold as '700',
+  },
+  roadmapRowTopic: {
+    color: colors.textMuted,
+    fontSize: font.size.xs,
+  },
+  roadmapRowSub: {
+    color: colors.textFaint,
+    fontSize: font.size.xs,
+    marginTop: 2,
+  },
+  roadmapRowProgress: {
+    gap: 4,
+    marginTop: spacing.sm,
+  },
+  roadmapRowMeta: {
+    color: colors.textFaint,
+    fontSize: font.size.xs,
+    fontWeight: font.weight.semibold as '600',
+  },
+  roadmapDeleteBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    borderLeftWidth: 1,
+    borderLeftColor: colors.borderSoft,
+  },
+
+  mutedNote: {
+    color: colors.textFaint,
+    fontSize: font.size.sm,
+    lineHeight: 20,
+  },
+
+  browseSection: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSoft,
+  },
+
+  chips: { gap: spacing.sm, paddingRight: spacing.lg },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -237,114 +446,45 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderSoft,
+    maxWidth: 180,
   },
   chipText: {
     color: colors.textMuted,
     fontWeight: font.weight.semibold as '600',
     fontSize: font.size.sm,
+    flexShrink: 1,
   },
-  trackChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: colors.bgElevated,
-    borderWidth: 1,
-    borderColor: colors.borderSoft,
+
+  subjectPreview: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    alignItems: 'flex-start',
   },
-  trackChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  trackChipText: {
-    color: colors.textMuted,
-    fontSize: font.size.xs,
-    fontWeight: font.weight.bold as '700',
-  },
-  content: { padding: spacing.lg, gap: spacing.xl },
-  roadmapsSection: { gap: spacing.md },
-  roadmapsHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  roadmapsTitle: {
-    color: colors.text,
-    fontSize: font.size.lg,
-    fontWeight: font.weight.bold as '700',
-  },
-  roadmapsLink: {
-    color: colors.primary,
-    fontSize: font.size.sm,
-    fontWeight: font.weight.semibold as '600',
-  },
-  roadmapsScroll: { gap: spacing.md, paddingRight: spacing.lg },
-  roadmapCard: {
-    width: 168,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.borderSoft,
-    gap: spacing.sm,
-  },
-  roadmapCardTitle: {
-    color: colors.text,
-    fontSize: font.size.sm,
-    fontWeight: font.weight.bold as '700',
-    minHeight: 36,
-  },
-  roadmapCardMeta: { color: colors.textMuted, fontSize: font.size.xs },
-  roadmapBarTrack: {
-    height: 4,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-    marginTop: 4,
-  },
-  roadmapBarFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-  },
-  hero: {
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-    gap: 6,
-  },
-  heroIcon: {
-    width: 52,
-    height: 52,
+  subjectPreviewIcon: {
+    width: 44,
+    height: 44,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.sm,
   },
-  heroTitle: {
-    color: colors.white,
-    fontSize: font.size.xxl,
-    fontWeight: font.weight.heavy as '800',
-  },
-  heroDesc: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: font.size.sm,
-    lineHeight: 20,
-  },
-  heroProgress: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginTop: spacing.md,
-  },
-  heroBarTrack: {
-    flex: 1,
-    height: 8,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-  },
-  heroBarFill: {
-    height: '100%',
-    backgroundColor: colors.white,
-    borderRadius: radius.pill,
-  },
-  heroProgressText: {
-    color: colors.white,
+  subjectPreviewTitle: {
+    color: colors.text,
+    fontSize: font.size.md,
     fontWeight: font.weight.bold as '700',
+  },
+  subjectPreviewDesc: {
+    color: colors.textMuted,
     fontSize: font.size.sm,
+    lineHeight: 19,
+    marginTop: 2,
+  },
+  subjectPreviewMeta: {
+    color: colors.textFaint,
+    fontSize: font.size.xs,
+    marginTop: spacing.sm,
+  },
+  viewLessonsBtn: {
+    marginTop: spacing.lg,
   },
 });

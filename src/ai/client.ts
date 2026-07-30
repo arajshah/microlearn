@@ -1,16 +1,23 @@
 import { sanitizeChatText, stripReasoningWrappers } from '@/ai/sanitize';
+import { generateLessonBatched } from '@/ai/heavyLessonGeneration';
+import { inferLessonGenerationMode } from '@/ai/lessonGenerationStrategy';
 import { getMasteryTier, MasteryLevel } from '@/data/mastery';
 import {
   AiConfig,
   LessonCard,
+  LessonGenerationMetadata,
   Subject,
 } from '@/types/content';
+import { LessonBlueprint, BLUEPRINT_VERSION } from '@/types/lessonBlueprint';
+import { LessonGenerationContext } from '@/types/lessonGeneration';
 import { RoadmapLessonContext } from '@/types/roadmap';
 
 export interface GenerateArgs {
   subject: Subject;
   topic: string;
   masteryLevel: MasteryLevel;
+  /** Target number of slides (screens) in the lesson. */
+  slideCount?: number;
   /** Optional source text (pasted article/notes or formatted URL extraction). */
   sourceText?: string;
   sourceUrl?: string;
@@ -26,6 +33,10 @@ export interface GeneratedLessonDraft {
   subtitle: string;
   minutes: number;
   cards: LessonCard[];
+  generationMetadata?: LessonGenerationMetadata;
+  conceptTags?: string[];
+  skillTags?: string[];
+  prerequisiteConcepts?: string[];
 }
 
 export class AiError extends Error {}
@@ -54,12 +65,15 @@ function snippet(s: string, n = 400): string {
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
 
-function buildSystemPrompt(masteryLevel: MasteryLevel): string {
+function buildSystemPrompt(masteryLevel: MasteryLevel, slideCount?: number): string {
   const tier = getMasteryTier(masteryLevel);
-  const [minCards, maxCards] = tier.cardRange;
+  const [tierMin, tierMax] = tier.cardRange;
   const [minMin, maxMin] = tier.minutesRange;
+  const targetSlides = slideCount ?? tierMin;
+  const minCards = slideCount ? Math.max(3, targetSlides - 1) : tierMin;
+  const maxCards = slideCount ? Math.min(20, targetSlides + 1) : tierMax;
   const bodySentences = masteryLevel <= 2 ? '2-3' : masteryLevel <= 3 ? '2-4' : '3-5';
-  const quizMin = Math.max(3, Math.floor(minCards / 2));
+  const quizMin = Math.max(2, Math.floor(targetSlides / 3));
 
   return `You are an expert curriculum designer for a premium microlearning app (think Duolingo meets Brilliant). You write accurate, engaging bite-sized lessons.
 
@@ -82,7 +96,8 @@ Each Card is ONE of:
 
 Audience: Level ${tier.level} — ${tier.name} (${tier.tagline}).
 Depth: ${tier.depth}
-Target length: ${minCards}-${maxCards} cards, ${minMin}-${maxMin} minutes total.
+Target length: ${slideCount ? `exactly ${targetSlides} slides` : `${minCards}-${maxCards} slides`}, ${minMin}-${maxMin} minutes total.
+- The "cards" array is the slide sequence — aim for ${slideCount ? targetSlides : `${minCards}-${maxCards}`} slides total.
 - "body" should be ${bodySentences} sentences per concept card.
 - Include at least ${quizMin} quiz or true/false checks.
 - Start with 2 concept cards, alternate checks, optionally end with a quote.
@@ -90,8 +105,9 @@ Target length: ${minCards}-${maxCards} cards, ${minMin}-${maxMin} minutes total.
 - Be factually accurate. Output ONLY the JSON — no \`<thought>\` blocks or commentary.`;
 }
 
-function buildUserPrompt({ subject, topic, masteryLevel, sourceText, sourceUrl, sourceTitle, roadmapContext }: GenerateArgs): string {
+function buildUserPrompt({ subject, topic, masteryLevel, slideCount, sourceText, sourceUrl, sourceTitle, roadmapContext }: GenerateArgs): string {
   const tier = getMasteryTier(masteryLevel);
+  const slideLine = slideCount ? `\nTarget slides: ${slideCount}.` : '';
   if (roadmapContext) {
     const prev =
       roadmapContext.previousLessons.length > 0
@@ -123,7 +139,7 @@ Upcoming lessons (stay aligned, don't duplicate):
 ${next}
 
 Subject area for examples: ${subject.title}.
-Make this lesson coherent with the path — build on prior lessons without repeating them.`;
+Make this lesson coherent with the path — build on prior lessons without repeating them.${slideLine}`;
   }
   const src = sourceText?.trim();
   if (src) {
@@ -135,8 +151,8 @@ Make this lesson coherent with the path — build on prior lessons without repea
     return `Create one microlearning lesson that teaches the most important ideas from the SOURCE MATERIAL below.
 Subject area: ${subject.title} (${subject.tagline}).
 ${topic.trim() ? `Focus especially on: "${topic.trim()}".` : ''}
-Mastery level: ${tier.level} (${tier.name}) — ${tier.depth}
-Distill accurate concepts into concept cards plus checks. Do not invent facts that contradict the source.
+Mastery level: ${tier.level} (${tier.name}) — ${tier.depth}${slideLine}
+Distill accurate concepts into concept slides plus checks. Do not invent facts that contradict the source.
 
 ${header}
 """
@@ -147,8 +163,77 @@ ${clipped}
   return `Create one microlearning lesson.
 Subject area: ${subject.title} (${subject.tagline}).
 Specific topic: "${t}".
-Mastery level: ${tier.level} (${tier.name}) — ${tier.depth}
+Mastery level: ${tier.level} (${tier.name}) — ${tier.depth}${slideLine}
 Make it genuinely useful, appropriately challenging, and memorable.`;
+}
+
+function standaloneTitle(args: GenerateArgs): string {
+  return args.roadmapContext?.lessonTitle || args.topic.trim() || args.subject.title;
+}
+
+function buildStandaloneBlueprint(args: GenerateArgs): LessonBlueprint {
+  const title = standaloneTitle(args);
+  const objective = args.roadmapContext?.learningObjective || `Understand ${title} and apply it accurately.`;
+  const keyIdeas = args.roadmapContext?.keyIdeas?.length
+    ? args.roadmapContext.keyIdeas
+    : [title, objective, `How ${title} is used`];
+  return {
+    id: `standalone-${Date.now().toString(36)}`,
+    roadmapId: 'standalone',
+    roadmapNodeId: 'standalone',
+    version: BLUEPRINT_VERSION,
+    title,
+    primaryObjective: objective,
+    prerequisiteRecall: ['Recall the core terms and why the topic matters.'],
+    keyIdeas,
+    explanationPlan: keyIdeas.map((idea) => `Explain ${idea}.`),
+    examplePlan: [`Work through a concrete example of ${title}.`],
+    interactionPlan: [
+      { type: 'multiple_choice', purpose: 'Check understanding.', conceptTested: keyIdeas[0] },
+      { type: 'prediction', purpose: 'Check transfer.', conceptTested: keyIdeas[1] ?? keyIdeas[0] },
+    ],
+    misconceptionChecks: [
+      {
+        misconception: `Treating ${title} as something to memorize rather than use.`,
+        diagnosticQuestion: `What is the most useful way to think about ${title}?`,
+        correctionGoal: 'Connect the concept to application.',
+      },
+    ],
+    applicationPlan: [`Apply ${title} in a realistic small case.`],
+    summaryPoints: keyIdeas.slice(0, 4),
+    estimatedMinutes: Math.min(12, Math.max(4, Math.ceil((args.slideCount ?? 8) * 0.75))),
+    createdAt: new Date().toISOString(),
+    coreMentalModel: `Think of ${title} as a reusable mental model, not just a definition.`,
+    workedExamplePlan: `Show a step-by-step example for ${title}.`,
+    visualModel: `Describe a visual model for ${title}.`,
+    misconceptionTargets: [`Confusing the surface wording of ${title} with its actual use.`],
+  };
+}
+
+function buildStandaloneContext(args: GenerateArgs): LessonGenerationContext {
+  const title = standaloneTitle(args);
+  const clippedSource = args.sourceText
+    ? args.sourceText.slice(0, MAX_SOURCE_CHARS)
+    : undefined;
+  return {
+    roadmapId: 'standalone',
+    roadmapTitle: args.roadmapContext?.roadmapTitle ?? `${args.subject.title} lesson`,
+    roadmapGoal: args.roadmapContext?.goal ?? `Learn ${title}`,
+    unitTitle: args.roadmapContext?.unitTitle ?? args.subject.title,
+    unitDescription: args.roadmapContext?.unitDescription ?? args.subject.tagline,
+    currentLessonTitle: title,
+    currentLearningObjective:
+      args.roadmapContext?.learningObjective ?? `Understand ${title} and apply it accurately.`,
+    currentKeyIdeas: args.roadmapContext?.keyIdeas ?? [title],
+    masteryLevel: args.masteryLevel,
+    learningPreferences: undefined,
+    previousLessonOutcomes: [],
+    knownMisconceptions: [],
+    upcomingLessons: args.roadmapContext?.nextLessons ?? [],
+    prerequisiteLessons: args.roadmapContext?.previousLessons ?? [],
+    sourceExcerpt: clippedSource,
+    slidesPerLesson: args.slideCount,
+  };
 }
 
 interface ExtractResult {
@@ -282,7 +367,7 @@ function validateCards(input: unknown): LessonCard[] {
   return cards;
 }
 
-function parseLesson(raw: string, finishReason: string): GeneratedLessonDraft {
+function parseLesson(raw: string, finishReason: string, slideCount?: number): GeneratedLessonDraft {
   const { candidate, truncated } = extractJson(raw);
   logRaw('Extracted JSON candidate', candidate);
 
@@ -325,9 +410,10 @@ function parseLesson(raw: string, finishReason: string): GeneratedLessonDraft {
     ['truncated', truncated],
   ]);
 
-  if (cards.length < 3 || questionCount < 1) {
+  const minSlides = slideCount ? Math.max(3, slideCount - 2) : 3;
+  if (cards.length < minSlides || questionCount < 1) {
     throw new AiError(
-      `The generated lesson was incomplete (${cards.length} valid cards, ${questionCount} questions). Try again or rephrase the topic.`,
+      `The generated lesson was incomplete (${cards.length} valid slides, ${questionCount} questions). Try again or rephrase the topic.`,
     );
   }
   const minutes = Number(obj.minutes);
@@ -406,9 +492,23 @@ export async function generateLesson(
   if (!config.baseUrl) throw new AiError('Set a provider base URL in Settings.');
   if (!config.model) throw new AiError('Choose a model in Settings.');
 
+  const mode = inferLessonGenerationMode({
+    slideCount: args.slideCount,
+    masteryLevel: args.masteryLevel,
+    topic: args.topic || args.roadmapContext?.lessonTitle,
+    subject: args.subject,
+    sourceText: args.sourceText,
+  });
+  if (mode !== 'light') {
+    const blueprint = buildStandaloneBlueprint(args);
+    const ctx = buildStandaloneContext(args);
+    return generateLessonBatched(config, blueprint, ctx, mode);
+  }
+
+  console.log('[lesson-gen] mode inferred: light');
   const tier = getMasteryTier(args.masteryLevel);
   const messages: ChatMessage[] = [
-    { role: 'system', content: buildSystemPrompt(args.masteryLevel) },
+    { role: 'system', content: buildSystemPrompt(args.masteryLevel, args.slideCount) },
     { role: 'user', content: buildUserPrompt(args) },
   ];
   const MAX_TOKENS = args.masteryLevel >= 4 ? 6144 : 4096;
@@ -485,7 +585,7 @@ export async function generateLesson(
     );
   }
 
-  return parseLesson(content, finishReason);
+  return parseLesson(content, finishReason, args.slideCount);
 }
 
 const TUTOR_SYSTEM = `You are a warm, sharp personal tutor inside a microlearning app.

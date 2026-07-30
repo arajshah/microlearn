@@ -142,7 +142,7 @@ export function UrlImportPanel({
       {confirmedSource ? (
         <View style={styles.readyBox}>
           <Ionicons name="checkmark-circle" size={18} color={colors.success} />
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.readyTitle} numberOfLines={1}>
               {confirmedSource.title}
             </Text>

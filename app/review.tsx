@@ -8,6 +8,8 @@ import { CardContent, Explanation, wasCardCorrect } from '@/components/CardView'
 import { useProgress } from '@/context/ProgressContext';
 import { useReview } from '@/context/ReviewContext';
 import { getSubject } from '@/data/courses';
+import { trackReviewAttempted } from '@/services/learningTelemetry';
+import { resolveCardConceptTags } from '@/utils/conceptTags';
 import { colors, font, radius, spacing } from '@/theme/theme';
 
 const XP_CORRECT = 6;
@@ -53,6 +55,14 @@ export default function ReviewSession() {
     setSelected(_optIndex);
     setRevealed(true);
     gradeItem(item.id, isCorrect);
+    for (const conceptSlug of resolveCardConceptTags(item.card)) {
+      trackReviewAttempted({
+        lessonId: item.lessonId,
+        itemId: item.id,
+        conceptSlug,
+        correct: isCorrect,
+      });
+    }
     if (isCorrect) {
       setCorrectCount((c) => c + 1);
       setXp((x) => x + XP_CORRECT);
@@ -172,7 +182,7 @@ function Summary({
       </Text>
       <Text style={styles.summarySub}>
         {empty
-          ? 'Your memory is fresh. Finish a lesson to add new cards to your review queue.'
+          ? 'Your memory is fresh. Finish a lesson to add new prompts to your review queue.'
           : `You recalled ${correct} of ${total} and earned +${xp} XP.`}
       </Text>
       <Pressable

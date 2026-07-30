@@ -9,7 +9,12 @@ import {
   View,
 } from 'react-native';
 import { MASTERY_TIERS, MasteryLevel } from '@/data/mastery';
-import { DEPTH_HINTS, DEPTH_LABELS, RoadmapDepth } from '@/types/roadmap';
+import {
+  DEPTH_HINTS,
+  ROADMAP_LESSON_PRESETS,
+  ROADMAP_SLIDES_PRESETS,
+  RoadmapDepth,
+} from '@/types/roadmap';
 import { colors, font, radius, spacing } from '@/theme/theme';
 
 export interface RoadmapFormValues {
@@ -17,6 +22,8 @@ export interface RoadmapFormValues {
   goal: string;
   masteryLevel: MasteryLevel;
   depth: RoadmapDepth;
+  lessonCount: number;
+  slidesPerLesson: number;
   preferences: string;
 }
 
@@ -29,9 +36,58 @@ interface Props {
   disabled: boolean;
   onSubmit: () => void;
   onRetry?: () => void;
+  showIntro?: boolean;
+  submitLabel?: string;
+  embedded?: boolean;
+  hideTopic?: boolean;
 }
 
 const DEPTHS: RoadmapDepth[] = ['quick', 'standard', 'deep'];
+
+const ROADMAP_SIZE_LABELS: Record<RoadmapDepth, string> = {
+  quick: 'Short path',
+  standard: 'Standard path',
+  deep: 'Deep path',
+};
+
+function CountStepper({
+  label,
+  value,
+  min,
+  max,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  disabled?: boolean;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <View style={styles.stepperBlock}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.stepperRow}>
+        <Pressable
+          onPress={() => onChange(Math.max(min, value - 1))}
+          disabled={disabled || value <= min}
+          style={[styles.stepBtn, (disabled || value <= min) && styles.stepBtnDisabled]}
+        >
+          <Ionicons name="remove" size={16} color={colors.textMuted} />
+        </Pressable>
+        <Text style={styles.stepValue}>{value}</Text>
+        <Pressable
+          onPress={() => onChange(Math.min(max, value + 1))}
+          disabled={disabled || value >= max}
+          style={[styles.stepBtn, (disabled || value >= max) && styles.stepBtnDisabled]}
+        >
+          <Ionicons name="add" size={16} color={colors.textMuted} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
 
 export function RoadmapGenerationForm({
   values,
@@ -42,23 +98,43 @@ export function RoadmapGenerationForm({
   disabled,
   onSubmit,
   onRetry,
+  showIntro = true,
+  submitLabel = 'Generate roadmap',
+  embedded = false,
+  hideTopic = false,
 }: Props) {
-  return (
-    <View style={styles.card}>
-      <Text style={styles.heading}>Learning roadmap</Text>
-      <Text style={styles.sub}>
-        Generate a structured path of bite-sized lessons toward your goal.
-      </Text>
+  const selectDepth = (d: RoadmapDepth) => {
+    onChange({
+      depth: d,
+      lessonCount: ROADMAP_LESSON_PRESETS[d],
+      slidesPerLesson: ROADMAP_SLIDES_PRESETS[d],
+    });
+  };
 
-      <Text style={styles.label}>Topic</Text>
-      <TextInput
-        value={values.topic}
-        onChangeText={(topic) => onChange({ topic })}
-        placeholder="e.g. Operating Systems"
-        placeholderTextColor={colors.textFaint}
-        style={styles.input}
-        editable={!loading}
-      />
+  return (
+    <View style={embedded ? styles.embedded : styles.card}>
+      {showIntro ? (
+        <>
+          <Text style={styles.heading}>Learning roadmap</Text>
+          <Text style={styles.sub}>
+            Generate a structured path of bite-sized lessons toward your goal.
+          </Text>
+        </>
+      ) : null}
+
+      {hideTopic ? null : (
+        <>
+          <Text style={styles.label}>Topic</Text>
+          <TextInput
+            value={values.topic}
+            onChangeText={(topic) => onChange({ topic })}
+            placeholder="e.g. Operating Systems"
+            placeholderTextColor={colors.textFaint}
+            style={styles.input}
+            editable={!loading}
+          />
+        </>
+      )}
 
       <Text style={styles.label}>Learning goal</Text>
       <TextInput
@@ -93,24 +169,43 @@ export function RoadmapGenerationForm({
         })}
       </View>
 
-      <Text style={styles.label}>Depth</Text>
+      <Text style={styles.label}>Roadmap size</Text>
       <View style={styles.depthRow}>
         {DEPTHS.map((d) => {
           const active = values.depth === d;
           return (
             <Pressable
               key={d}
-              onPress={() => onChange({ depth: d })}
+              onPress={() => selectDepth(d)}
               disabled={loading}
               style={[styles.depthChip, active && styles.depthChipActive]}
             >
               <Text style={[styles.depthTitle, active && { color: colors.text }]}>
-                {DEPTH_LABELS[d]}
+                {ROADMAP_SIZE_LABELS[d]}
               </Text>
               <Text style={styles.depthHint}>{DEPTH_HINTS[d]}</Text>
             </Pressable>
           );
         })}
+      </View>
+
+      <View style={styles.stepperGrid}>
+        <CountStepper
+          label="Lessons in roadmap"
+          value={values.lessonCount}
+          min={3}
+          max={30}
+          disabled={loading}
+          onChange={(lessonCount) => onChange({ lessonCount })}
+        />
+        <CountStepper
+          label="Slides per lesson"
+          value={values.slidesPerLesson}
+          min={3}
+          max={15}
+          disabled={loading}
+          onChange={(slidesPerLesson) => onChange({ slidesPerLesson })}
+        />
       </View>
 
       <Text style={styles.label}>Preferences (optional)</Text>
@@ -149,7 +244,7 @@ export function RoadmapGenerationForm({
       >
         <Ionicons name="map" size={18} color={disabled || loading ? colors.textFaint : colors.bg} />
         <Text style={[styles.submitText, (disabled || loading) && { color: colors.textFaint }]}>
-          Generate Roadmap
+          {submitLabel}
         </Text>
       </Pressable>
     </View>
@@ -163,6 +258,9 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  embedded: {
     gap: spacing.sm,
   },
   heading: {
@@ -223,6 +321,34 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold as '700',
   },
   depthHint: { color: colors.textFaint, fontSize: font.size.xs, marginTop: 2 },
+  stepperGrid: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.xs },
+  stepperBlock: { flex: 1, minWidth: 0, gap: spacing.xs },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    padding: spacing.xs,
+  },
+  stepBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  stepBtnDisabled: { opacity: 0.4 },
+  stepValue: {
+    color: colors.text,
+    fontSize: font.size.lg,
+    fontWeight: font.weight.bold as '700',
+    minWidth: 28,
+    textAlign: 'center',
+  },
   loadingBox: {
     flexDirection: 'row',
     alignItems: 'center',

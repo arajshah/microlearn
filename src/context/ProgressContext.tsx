@@ -8,13 +8,8 @@ import React, {
   useState,
 } from 'react';
 import { Lesson, SubjectId } from '@/types/content';
-import {
-  findLesson,
-  lessonXp,
-  subjects,
-  subjectLessons,
-  totalLessonCount,
-} from '@/data/courses';
+import { flushLearningEvents } from '@/services/learningTelemetry';
+import { lessonXp } from '@/utils/lessonXp';
 import { addDays, dayKey, daysBetween } from '@/utils/date';
 
 const STORAGE_KEY = 'microlearn.progress.v1';
@@ -144,6 +139,11 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
+  // Drain telemetry queued while the backend was unreachable. Never blocks the UI.
+  useEffect(() => {
+    void flushLearningEvents();
+  }, []);
+
   const persist = useCallback((next: ProgressState) => {
     setState(next);
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {});
@@ -226,17 +226,13 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
       completeLesson,
       awardXp,
       subjectProgress: (subjectId) => {
-        const subject = subjects.find((s) => s.id === subjectId);
-        if (!subject) return { done: 0, total: 0, pct: 0 };
-        const lessons = subjectLessons(subject);
-        const done = lessons.filter((l) => state.completed[l.id]).length;
-        const total = lessons.length;
-        return { done, total, pct: total ? done / total : 0 };
+        const done = Object.values(state.completed).filter((c) => c.subjectId === subjectId).length;
+        return { done, total: Math.max(done, 1), pct: done > 0 ? 1 : 0 };
       },
       todayXp,
       goalPct: Math.min(1, todayXp / DAILY_GOAL_XP),
       completedCount: Object.keys(state.completed).length,
-      totalLessons: totalLessonCount,
+      totalLessons: Object.keys(state.completed).length,
       resetAll,
     };
   }, [state, completeLesson, awardXp, resetAll]);
@@ -255,6 +251,3 @@ export function useProgress(): ProgressContextValue {
   }
   return ctx;
 }
-
-// Re-export so screens can import the helper alongside the hook.
-export { findLesson };

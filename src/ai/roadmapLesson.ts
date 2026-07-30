@@ -12,6 +12,8 @@ import { LESSON_PROMPT_VERSION } from '@/types/lessonBlueprint';
 import { LessonGenerationContext } from '@/types/lessonGeneration';
 import { AiConfig, GeneratedLesson, SubjectId } from '@/types/content';
 import { GeneratedRoadmap, RoadmapLessonNode } from '@/types/roadmap';
+import { buildFallbackBlueprint, buildFallbackCards } from '@/utils/roadmapLessonFallback';
+import { repairAndValidateLesson } from '@/utils/contentQuality';
 
 function makeLessonId(): string {
   return `gen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -49,15 +51,29 @@ export async function generateRoadmapLesson(
   node: RoadmapLessonNode,
   subjectId: SubjectId,
 ): Promise<RoadmapLessonDraft> {
-  const blueprint = await ensureLessonBlueprint(config, ctx, node.id, node);
-
-  const draft = await generateLessonFromBlueprint(config, blueprint, ctx);
-
-  return {
-    ...draft,
-    blueprintId: blueprint.id,
-    blueprintVersion: blueprint.version,
-  };
+  try {
+    const blueprint = await ensureLessonBlueprint(config, ctx, node.id, node);
+    const draft = await generateLessonFromBlueprint(config, blueprint, ctx);
+    return {
+      ...draft,
+      blueprintId: blueprint.id,
+      blueprintVersion: blueprint.version,
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'unknown error';
+    console.warn('[ai] using fallback roadmap lesson', ctx.roadmapId, node.id, message);
+    const blueprint = buildFallbackBlueprint(ctx, node);
+    await saveLessonBlueprint(blueprint).catch(() => {});
+    return {
+      title: node.title,
+      subtitle: node.shortDescription || blueprint.primaryObjective,
+      minutes: blueprint.estimatedMinutes,
+      cards: buildFallbackCards(ctx, node, blueprint),
+      primaryObjective: blueprint.primaryObjective,
+      blueprintId: blueprint.id,
+      blueprintVersion: blueprint.version,
+    };
+  }
 }
 
 export function draftToGeneratedLesson(
@@ -69,9 +85,11 @@ export function draftToGeneratedLesson(
     roadmapNodeId: string;
     model?: string;
     existingId?: string;
+    slidesPerLesson?: number;
+    isFinalLesson?: boolean;
   },
 ): GeneratedLesson {
-  return {
+  const base: GeneratedLesson = {
     id: args.existingId ?? makeLessonId(),
     title: draft.title,
     subtitle: draft.subtitle,
@@ -88,7 +106,20 @@ export function draftToGeneratedLesson(
     blueprintVersion: draft.blueprintVersion,
     promptVersion: LESSON_PROMPT_VERSION,
     model: args.model,
+    generationMetadata: draft.generationMetadata,
+    conceptTags: draft.conceptTags,
+    skillTags: draft.skillTags,
+    prerequisiteConcepts: draft.prerequisiteConcepts,
   };
+
+  const { lesson } = repairAndValidateLesson(base, {
+    targetSlideCount: args.slidesPerLesson,
+    topic: args.topic,
+    isDeepLesson: (args.slidesPerLesson ?? draft.cards.length) >= 10,
+    isFinalLesson: args.isFinalLesson,
+  });
+
+  return lesson;
 }
 
 export async function persistRoadmapLessonArtifacts(
@@ -132,7 +163,7 @@ export async function prepareNextLessonBlueprint(
   try {
     await ensureLessonBlueprint(config, ctx, next.id, next);
   } catch {
-    // Silent — blueprint pre-generation must not block the learner.
+    // Silent - blueprint pre-generation must not block the learner.
   }
 }
 

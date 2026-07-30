@@ -35,9 +35,9 @@ export default function SavedScreen() {
       {bookmarks.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="bookmark-outline" size={44} color={colors.textFaint} />
-          <Text style={styles.emptyTitle}>No saved cards yet</Text>
+          <Text style={styles.emptyTitle}>No saved slides yet</Text>
           <Text style={styles.emptyText}>
-            Tap the bookmark icon on any card while learning to keep it here for
+            Tap the bookmark icon on any slide while learning to keep it here for
             quick review.
           </Text>
         </View>

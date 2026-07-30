@@ -136,6 +136,27 @@ export function parseBlueprintObject(
     nextLessonConnection: asString(obj.nextLessonConnection) || undefined,
     estimatedMinutes: Math.min(8, Math.max(3, estimatedMinutes)),
     createdAt: new Date().toISOString(),
+    coreMentalModel: asString(obj.coreMentalModel) || undefined,
+    formalDefinition: asString(obj.formalDefinition) || undefined,
+    notation: Array.isArray(obj.notation)
+      ? obj.notation
+          .map((n) => {
+            if (!n || typeof n !== 'object') return null;
+            const r = n as Record<string, unknown>;
+            const symbol = asString(r.symbol);
+            const meaning = asString(r.meaning);
+            return symbol && meaning ? { symbol, meaning } : null;
+          })
+          .filter(Boolean) as { symbol: string; meaning: string }[]
+      : undefined,
+    workedExamplePlan: asString(obj.workedExamplePlan) || undefined,
+    misconceptionTargets: asStringArray(obj.misconceptionTargets),
+    visualModel: asString(obj.visualModel) || undefined,
+    practiceCheck: asString(obj.practiceCheck) || undefined,
+    nextBridge: asString(obj.nextBridge) || undefined,
+    conceptTags: asStringArray(obj.conceptTags),
+    skillTags: asStringArray(obj.skillTags),
+    prerequisiteConcepts: asStringArray(obj.prerequisiteConcepts),
   };
 
   return { blueprint, errors };
@@ -184,6 +205,8 @@ function cardStage(card: LessonCard): LessonStage | null {
     case 'example':
     case 'code':
       return 'example';
+    case 'worked_example':
+      return 'example';
     case 'quiz':
     case 'truefalse':
     case 'fillblank':
@@ -192,6 +215,7 @@ function cardStage(card: LessonCard): LessonStage | null {
     case 'prediction':
       return 'interaction';
     case 'misconception':
+    case 'misconception_check':
       return 'misconception';
     case 'application':
       return 'application';
@@ -199,6 +223,11 @@ function cardStage(card: LessonCard): LessonStage | null {
       return 'summary';
     case 'next_connection':
       return 'next_connection';
+    case 'formula':
+    case 'derivation':
+    case 'visual_model':
+    case 'compare_contrast':
+      return 'explanation';
     default:
       return null;
   }
@@ -212,6 +241,7 @@ function isGradedCardType(card: LessonCard): card is GradedCard {
     card.type === 'matching' ||
     card.type === 'ordering' ||
     card.type === 'misconception' ||
+    card.type === 'misconception_check' ||
     card.type === 'application' ||
     card.type === 'prediction'
   );
@@ -227,7 +257,7 @@ function validateGradedCard(card: GradedCard): string[] {
       errors.push('Invalid answerIndex');
     }
     if (!c.explanation?.trim()) errors.push('Missing explanation');
-  } else if (card.type === 'misconception') {
+  } else if (card.type === 'misconception' || card.type === 'misconception_check') {
     const c = card as MisconceptionCard;
     if (!c.question?.trim() || c.options.length < 2) errors.push('Invalid misconception card');
     if (c.answerIndex < 0 || c.answerIndex >= c.options.length) {
@@ -256,11 +286,18 @@ function validateGradedCard(card: GradedCard): string[] {
 export function validateMaterializedLesson(
   cards: LessonCard[],
   blueprint: LessonBlueprint,
+  targetSlideCount?: number,
 ): string[] {
   const errors: string[] = [];
+  const minSlides = targetSlideCount ? Math.max(3, targetSlideCount - 2) : 6;
+  const maxSlides = targetSlideCount ? Math.min(20, targetSlideCount + 2) : 12;
 
-  if (cards.length < 6 || cards.length > 12) {
-    errors.push(`Expected 6–10 cards, got ${cards.length}`);
+  if (cards.length < minSlides || cards.length > maxSlides) {
+    errors.push(
+      targetSlideCount
+        ? `Expected ~${targetSlideCount} slides, got ${cards.length}`
+        : `Expected 6–10 slides, got ${cards.length}`,
+    );
   }
 
   const ids = cards.map((c, i) => c.id ?? `c${i + 1}`);
@@ -294,7 +331,12 @@ export function validateMaterializedLesson(
   if (
     blueprint.misconceptionChecks.length > 0 &&
     !stages.has('misconception') &&
-    !cards.some((c) => c.type === 'quiz' || c.type === 'truefalse')
+    !cards.some(
+      (c) =>
+        c.type === 'quiz' ||
+        c.type === 'truefalse' ||
+        c.type === 'misconception_check',
+    )
   ) {
     errors.push('Missing misconception check');
   }

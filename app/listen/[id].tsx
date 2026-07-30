@@ -136,7 +136,7 @@ export default function ListenSession() {
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
         <Text style={styles.counter}>
-          Card {index + 1} of {cards.length}
+          Slide {index + 1} of {cards.length}
         </Text>
       </View>
     </View>

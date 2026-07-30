@@ -1,5 +1,6 @@
 import { CardRef, QuizCard, SubjectId, TrueFalseCard, FillBlankCard } from '@/types/content';
-import { allLessons } from '@/data/courses';
+import { GeneratedLesson } from '@/types/content';
+import { getSubject } from '@/data/subjects';
 import { makeItemId } from '@/srs/scheduler';
 import { mulberry32, seedFromString, shuffle } from '@/utils/random';
 
@@ -11,19 +12,19 @@ export interface ChallengeRef extends CardRef {
 
 export const DAILY_CHALLENGE_SIZE = 7;
 
-/** All quiz/true-false cards across the built-in catalogue, as challenge refs. */
-function questionPool(): ChallengeRef[] {
+function questionPool(generatedLessons: GeneratedLesson[]): ChallengeRef[] {
   const pool: ChallengeRef[] = [];
-  for (const { subject, lesson } of allLessons()) {
+  for (const lesson of generatedLessons) {
+    const subject = getSubject(lesson.subjectId);
     lesson.cards.forEach((card, cardIndex) => {
       if (card.type === 'quiz' || card.type === 'truefalse' || card.type === 'fillblank') {
         pool.push({
           id: makeItemId(lesson.id, cardIndex),
           lessonId: lesson.id,
           lessonTitle: lesson.title,
-          subjectId: subject.id,
-          subjectTitle: subject.title,
-          accent: subject.accent,
+          subjectId: lesson.subjectId,
+          subjectTitle: subject?.title ?? 'AI',
+          accent: subject?.accent ?? '#6366f1',
           cardIndex,
           card,
         });
@@ -34,16 +35,16 @@ function questionPool(): ChallengeRef[] {
 }
 
 /**
- * A stable, date-seeded set of mixed questions. The same `dayKey` always yields
- * the same challenge, so reopening it mid-session is safe; it rolls over daily.
+ * A stable, date-seeded set of mixed questions from generated lessons.
  */
 export function buildDailyChallenge(
   dayKey: string,
+  generatedLessons: GeneratedLesson[],
   size: number = DAILY_CHALLENGE_SIZE,
 ): ChallengeRef[] {
-  const pool = questionPool();
+  const pool = questionPool(generatedLessons);
+  if (pool.length === 0) return [];
   const rnd = mulberry32(seedFromString(`challenge:${dayKey}`));
-  // Spread picks across subjects when possible by interleaving shuffled groups.
   const bySubject = new Map<SubjectId, ChallengeRef[]>();
   for (const ref of shuffle(pool, rnd)) {
     const list = bySubject.get(ref.subjectId) ?? [];

@@ -56,6 +56,7 @@ export interface TutorPanelProps {
   variant?: 'inline' | 'fullscreen';
   onClose?: () => void;
   maxHeight?: number;
+  keyboardVerticalOffset?: number;
   onKeyboardChange?: (visible: boolean) => void;
 }
 
@@ -66,6 +67,7 @@ export function TutorPanel({
   variant = 'inline',
   onClose,
   maxHeight = 320,
+  keyboardVerticalOffset,
   onKeyboardChange,
 }: TutorPanelProps) {
   const insets = useSafeAreaInsets();
@@ -74,7 +76,7 @@ export function TutorPanel({
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardUp, setKeyboardUp] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
 
@@ -82,12 +84,12 @@ export function TutorPanel({
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
-    const onShow = (e: { endCoordinates: { height: number } }) => {
-      setKeyboardHeight(e.endCoordinates.height);
+    const onShow = () => {
+      setKeyboardUp(true);
       onKeyboardChange?.(true);
     };
     const onHide = () => {
-      setKeyboardHeight(0);
+      setKeyboardUp(false);
       onKeyboardChange?.(false);
     };
 
@@ -98,11 +100,6 @@ export function TutorPanel({
       hideSub.remove();
     };
   }, [onKeyboardChange]);
-
-  const keyboardUp = keyboardHeight > 0;
-  const keyboardLift = keyboardUp
-    ? Math.max(0, keyboardHeight - insets.bottom)
-    : 0;
 
   const send = async (text: string) => {
     const trimmed = text.trim();
@@ -134,19 +131,19 @@ export function TutorPanel({
 
   const empty = messages.length === 0;
   const isFullscreen = variant === 'fullscreen';
-  const panelMaxHeight = keyboardUp
-    ? Math.min(maxHeight + 80, 420)
-    : maxHeight;
+  const offset =
+    keyboardVerticalOffset ?? (isFullscreen ? insets.top + 56 : insets.top + 48);
 
-  const panelStyle = [
-    styles.panel,
-    isFullscreen ? styles.panelFullscreen : { maxHeight: panelMaxHeight },
-    !isFullscreen && keyboardUp && { flex: 1, maxHeight: undefined },
-    !isFullscreen && { marginBottom: keyboardLift },
-  ];
-
-  const panelContent = (
-    <>
+  return (
+    <KeyboardAvoidingView
+      style={[
+        styles.panel,
+        isFullscreen ? styles.panelFullscreen : { maxHeight },
+        !isFullscreen && keyboardUp && styles.panelInlineKeyboard,
+      ]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={offset}
+    >
       <View style={styles.panelHeader}>
         <View style={styles.panelHeaderLeft}>
           <View style={[styles.badge, { backgroundColor: `${accent}22` }]}>
@@ -173,14 +170,18 @@ export function TutorPanel({
       <ScrollView
         ref={scrollRef}
         style={styles.messages}
-        contentContainerStyle={styles.messagesContent}
+        contentContainerStyle={[
+          styles.messagesContent,
+          keyboardUp && styles.messagesContentKeyboard,
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
         {empty ? (
           <Text style={styles.welcome}>
             {contextLabel
-              ? 'Ask about this card — explanations, examples, or a quick quiz.'
+              ? 'Ask about this slide — explanations, examples, or a quick quiz.'
               : 'Your personal tutor is ready. Ask anything you are learning.'}
           </Text>
         ) : (
@@ -212,10 +213,11 @@ export function TutorPanel({
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
 
-      {empty ? (
+      {empty && !keyboardUp ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.suggestionsRow}
           contentContainerStyle={styles.suggestions}
           keyboardShouldPersistTaps="handled"
         >
@@ -227,7 +229,7 @@ export function TutorPanel({
         </ScrollView>
       ) : null}
 
-      <View style={styles.inputBar}>
+      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
         <TextInput
           ref={inputRef}
           style={styles.input}
@@ -259,22 +261,8 @@ export function TutorPanel({
           />
         </Pressable>
       </View>
-    </>
+    </KeyboardAvoidingView>
   );
-
-  if (isFullscreen) {
-    return (
-      <KeyboardAvoidingView
-        style={panelStyle}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={insets.top + 56}
-      >
-        {panelContent}
-      </KeyboardAvoidingView>
-    );
-  }
-
-  return <View style={panelStyle}>{panelContent}</View>;
 }
 
 const styles = StyleSheet.create({
@@ -287,6 +275,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   panelFullscreen: { flex: 1, borderTopLeftRadius: 0, borderTopRightRadius: 0 },
+  panelInlineKeyboard: { flex: 1, maxHeight: undefined },
   panelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -294,6 +283,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+    flexShrink: 0,
   },
   panelHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
   badge: {
@@ -311,8 +301,9 @@ const styles = StyleSheet.create({
   panelSub: { color: colors.textFaint, fontSize: font.size.xs, maxWidth: 220 },
   closeBtn: { padding: 4 },
 
-  messages: { flexGrow: 1, flexShrink: 1, minHeight: 80 },
+  messages: { flexGrow: 1, flexShrink: 1, minHeight: 72 },
   messagesContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
+  messagesContentKeyboard: { paddingBottom: spacing.md },
   welcome: {
     color: colors.textMuted,
     fontSize: font.size.sm,
@@ -350,7 +341,17 @@ const styles = StyleSheet.create({
   typingText: { color: colors.textMuted, fontSize: font.size.xs },
   error: { color: colors.danger, fontSize: font.size.xs, textAlign: 'center' },
 
-  suggestions: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.sm },
+  suggestionsRow: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxHeight: 42,
+  },
+  suggestions: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+    alignItems: 'center',
+  },
   chip: {
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -358,18 +359,25 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
+    maxWidth: 180,
   },
-  chipText: { color: colors.textMuted, fontSize: font.size.xs, fontWeight: font.weight.semibold as '600' },
+  chipText: {
+    color: colors.textMuted,
+    fontSize: font.size.xs,
+    fontWeight: font.weight.semibold as '600',
+    lineHeight: 16,
+  },
 
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.borderSoft,
     backgroundColor: colors.bgElevated,
+    flexShrink: 0,
   },
   input: {
     flex: 1,

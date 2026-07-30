@@ -19,6 +19,10 @@ export interface GeneratedRoadmap {
   description: string;
   masteryLevel: MasteryLevel;
   depth: RoadmapDepth;
+  /** Target lesson count chosen at generation time. */
+  targetLessonCount?: number;
+  /** Target slides per lesson for lazy lesson generation. */
+  slidesPerLesson?: number;
   preferences?: string;
   estimatedTotalMinutes: number;
   createdAt: string;
@@ -59,11 +63,31 @@ export interface GenerateRoadmapInput {
   goal: string;
   masteryLevel: MasteryLevel;
   depth: RoadmapDepth;
+  lessonCount: number;
+  slidesPerLesson: number;
   preferences?: string;
   sourceUrl?: string;
   sourceExtractionId?: string;
   sourceContext?: RoadmapSourceContext;
 }
+
+export const LESSON_SLIDE_PRESETS: Record<RoadmapDepth, number> = {
+  quick: 5,
+  standard: 8,
+  deep: 12,
+};
+
+export const ROADMAP_LESSON_PRESETS: Record<RoadmapDepth, number> = {
+  quick: 6,
+  standard: 10,
+  deep: 16,
+};
+
+export const ROADMAP_SLIDES_PRESETS: Record<RoadmapDepth, number> = {
+  quick: 6,
+  standard: 8,
+  deep: 10,
+};
 
 /** Context passed into lazy lesson generation for coherence. */
 export interface RoadmapLessonContext {
@@ -86,7 +110,7 @@ export const DEPTH_LABELS: Record<RoadmapDepth, string> = {
 };
 
 export const DEPTH_HINTS: Record<RoadmapDepth, string> = {
-  quick: '8–12 lessons · foundations fast',
-  standard: '16–25 lessons · balanced path',
-  deep: '28–45 lessons · comprehensive mastery',
+  quick: '6 lessons · 6 slides each',
+  standard: '10 lessons · 8 slides each',
+  deep: '16 lessons · 10 slides each',
 };

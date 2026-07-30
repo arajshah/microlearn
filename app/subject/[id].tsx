@@ -2,17 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { UnitList } from '@/components/UnitList';
+import { PrimaryButton } from '@/components/ui';
 import { useProgress } from '@/context/ProgressContext';
-import { getSubject } from '@/data/courses';
+import { getSubject } from '@/data/subjects';
 import { colors, font, radius, spacing } from '@/theme/theme';
 
 export default function SubjectScreen() {
@@ -30,7 +24,7 @@ export default function SubjectScreen() {
     );
   }
 
-  const { done, total, pct } = subjectProgress(subject.id);
+  const { done } = subjectProgress(subject.id);
 
   return (
     <View style={styles.screen}>
@@ -50,24 +44,30 @@ export default function SubjectScreen() {
           </Pressable>
 
           <View style={styles.heroIcon}>
-            <Ionicons name={subject.icon as any} size={30} color={colors.white} />
+            <Ionicons name={subject.icon as keyof typeof Ionicons.glyphMap} size={30} color={colors.white} />
           </View>
           <Text style={styles.heroTitle}>{subject.title}</Text>
           <Text style={styles.heroTagline}>{subject.tagline}</Text>
           <Text style={styles.heroDesc}>{subject.description}</Text>
 
-          <View style={styles.heroProgress}>
-            <View style={styles.heroBarTrack}>
-              <View style={[styles.heroBarFill, { width: `${pct * 100}%` }]} />
-            </View>
+          {done > 0 ? (
             <Text style={styles.heroProgressText}>
-              {done}/{total} done
+              {done} lesson{done === 1 ? '' : 's'} completed in this subject
             </Text>
-          </View>
+          ) : null}
         </LinearGradient>
 
         <View style={styles.body}>
-          <UnitList subject={subject} />
+          <Text style={styles.bodyTitle}>Create in this subject</Text>
+          <Text style={styles.bodyText}>
+            Generate a standalone lesson or build a roadmap focused on {subject.title.toLowerCase()}.
+          </Text>
+          <PrimaryButton
+            label="Open Create"
+            icon="sparkles"
+            accent={subject.accent}
+            onPress={() => router.push({ pathname: '/create', params: { subjectId: subject.id } })}
+          />
         </View>
       </ScrollView>
     </View>
@@ -119,28 +119,21 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 4,
   },
-  heroProgress: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginTop: spacing.lg,
-  },
-  heroBarTrack: {
-    flex: 1,
-    height: 8,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-  },
-  heroBarFill: {
-    height: '100%',
-    backgroundColor: colors.white,
-    borderRadius: radius.pill,
-  },
   heroProgressText: {
     color: colors.white,
     fontWeight: font.weight.bold as '700',
     fontSize: font.size.sm,
+    marginTop: spacing.lg,
   },
-  body: { padding: spacing.lg, paddingTop: spacing.xl },
+  body: { padding: spacing.lg, paddingTop: spacing.xl, gap: spacing.md },
+  bodyTitle: {
+    color: colors.text,
+    fontSize: font.size.lg,
+    fontWeight: font.weight.bold as '700',
+  },
+  bodyText: {
+    color: colors.textMuted,
+    fontSize: font.size.sm,
+    lineHeight: 20,
+  },
 });

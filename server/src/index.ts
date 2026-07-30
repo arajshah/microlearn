@@ -4,6 +4,8 @@ import { initDatabase } from './db';
 import { logger } from './logger';
 import { createHealthRouter } from './routes/health';
 import { createMcpRouter } from './mcp/mcpServer';
+import { createApiRouter } from './api/router';
+import { requireBearerToken } from './auth/bearerAuth';
 
 function main(): void {
   const config = loadConfig();
@@ -13,7 +15,14 @@ function main(): void {
   app.use(express.json({ limit: '4mb' }));
 
   app.use(createHealthRouter(config, db));
-  app.use(createMcpRouter(config, db));
+  app.use('/api', createApiRouter(config, db));
+
+  const mcpRouter = createMcpRouter(config, db);
+  if (config.requireAuth) {
+    app.use(requireBearerToken(config.mcpBearerToken), mcpRouter);
+  } else {
+    app.use(mcpRouter);
+  }
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({ ok: false, error: 'Not found' });
@@ -31,7 +40,11 @@ function main(): void {
       env: config.nodeEnv,
       port: config.port,
       health: `http://localhost:${config.port}/health`,
+      api: `http://localhost:${config.port}/api/health`,
       mcp: `http://localhost:${config.port}/mcp`,
+      writeTools: config.enableWriteTools,
+      gitPush: config.enableGitPush,
+      requireAuth: config.requireAuth,
     });
   });
 

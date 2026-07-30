@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CompletedLesson } from '@/context/ProgressContext';
-import { subjects, subjectLessons } from './courses';
 import { SubjectId } from '@/types/content';
 
 export interface AchievementView {
@@ -22,12 +21,12 @@ interface Snapshot {
 
 export function deriveAchievements(s: Snapshot): AchievementView[] {
   const records = Object.values(s.completed);
-  const completedIds = new Set(records.map((r) => r.lessonId));
-
   const subjectsTouched = new Set(records.map((r) => r.subjectId));
-  const subjectsCompleted = subjects.filter((sub) =>
-    subjectLessons(sub).every((l) => completedIds.has(l.id)),
-  ).length;
+  const lessonsPerSubject = new Map<SubjectId, number>();
+  for (const r of records) {
+    lessonsPerSubject.set(r.subjectId, (lessonsPerSubject.get(r.subjectId) ?? 0) + 1);
+  }
+  const deepestSubject = Math.max(0, ...lessonsPerSubject.values());
   const perfectLessons = records.filter(
     (r) => r.total > 0 && r.correct === r.total,
   ).length;
@@ -94,7 +93,7 @@ export function deriveAchievements(s: Snapshot): AchievementView[] {
     {
       id: 'polymath',
       title: 'Polymath',
-      description: 'Study all four subjects',
+      description: 'Study four different subjects',
       icon: 'planet',
       unlocked: subjectsTouched.size >= 4,
       progress: clamp(subjectsTouched.size / 4),
@@ -102,10 +101,10 @@ export function deriveAchievements(s: Snapshot): AchievementView[] {
     {
       id: 'subject-master',
       title: 'Subject Master',
-      description: 'Finish every lesson in a subject',
+      description: 'Complete 5 lessons in one subject',
       icon: 'trophy',
-      unlocked: subjectsCompleted >= 1,
-      progress: clamp(subjectsCompleted / 1),
+      unlocked: deepestSubject >= 5,
+      progress: clamp(deepestSubject / 5),
     },
   ];
 }

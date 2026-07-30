@@ -12,21 +12,22 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLibrary } from '@/context/LibraryContext';
 import { useProgress } from '@/context/ProgressContext';
-import { allLessons, getSubject, subjects } from '@/data/courses';
-import { Lesson, SubjectId } from '@/types/content';
+import { useRoadmaps } from '@/context/RoadmapContext';
+import { getSubject, subjects } from '@/data/subjects';
+import { GeneratedLesson, Lesson, SubjectId } from '@/types/content';
 import { colors, font, radius, spacing } from '@/theme/theme';
 
 interface Entry {
-  lessonId: string;
+  id: string;
+  kind: 'lesson' | 'roadmap';
   title: string;
   subtitle: string;
-  subjectId: SubjectId;
+  subjectId?: SubjectId;
   subjectTitle: string;
   accent: string;
   icon: string;
-  minutes: number;
-  cardCount: number;
-  generated: boolean;
+  minutes?: number;
+  cardCount?: number;
   haystack: string;
 }
 
@@ -59,58 +60,57 @@ function cardText(lesson: Lesson): string {
     .join(' ');
 }
 
+function lessonEntry(lesson: GeneratedLesson): Entry {
+  const subject = getSubject(lesson.subjectId);
+  return {
+    id: lesson.id,
+    kind: 'lesson',
+    title: lesson.title,
+    subtitle: lesson.subtitle || lesson.topic,
+    subjectId: lesson.subjectId,
+    subjectTitle: subject?.title ?? 'AI',
+    accent: subject?.accent ?? colors.primary,
+    icon: subject?.icon ?? 'sparkles',
+    minutes: lesson.minutes,
+    cardCount: lesson.cards.length,
+    haystack: `${lesson.title} ${lesson.subtitle} ${lesson.topic} ${cardText(lesson)}`.toLowerCase(),
+  };
+}
+
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { generatedLessons } = useLibrary();
+  const { roadmaps } = useRoadmaps();
   const { isLessonComplete } = useProgress();
 
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<SubjectId | 'all'>('all');
+  const [filter, setFilter] = useState<SubjectId | 'all' | 'roadmaps'>('all');
 
   const entries = useMemo<Entry[]>(() => {
-    const out: Entry[] = [];
-    for (const { subject, lesson } of allLessons()) {
+    const out: Entry[] = generatedLessons.map(lessonEntry);
+    for (const rm of roadmaps) {
       out.push({
-        lessonId: lesson.id,
-        title: lesson.title,
-        subtitle: lesson.subtitle,
-        subjectId: subject.id,
-        subjectTitle: subject.title,
-        accent: subject.accent,
-        icon: subject.icon,
-        minutes: lesson.minutes,
-        cardCount: lesson.cards.length,
-        generated: false,
-        haystack: `${lesson.title} ${lesson.subtitle} ${subject.title} ${cardText(lesson)}`.toLowerCase(),
-      });
-    }
-    for (const lesson of generatedLessons) {
-      const subject = getSubject(lesson.subjectId);
-      out.push({
-        lessonId: lesson.id,
-        title: lesson.title,
-        subtitle: lesson.subtitle || lesson.topic,
-        subjectId: lesson.subjectId,
-        subjectTitle: subject?.title ?? 'AI',
-        accent: subject?.accent ?? colors.primary,
-        icon: subject?.icon ?? 'sparkles',
-        minutes: lesson.minutes,
-        cardCount: lesson.cards.length,
-        generated: true,
-        haystack: `${lesson.title} ${lesson.subtitle} ${lesson.topic} ${cardText(lesson)}`.toLowerCase(),
+        id: rm.id,
+        kind: 'roadmap',
+        title: rm.title,
+        subtitle: rm.topic,
+        subjectTitle: 'Roadmap',
+        accent: colors.paths,
+        icon: 'map',
+        haystack: `${rm.title} ${rm.topic} ${rm.goal}`.toLowerCase(),
       });
     }
     return out;
-  }, [generatedLessons]);
+  }, [generatedLessons, roadmaps]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return entries.filter(
-      (e) =>
-        (filter === 'all' || e.subjectId === filter) &&
-        (q === '' || e.haystack.includes(q)),
-    );
+    return entries.filter((e) => {
+      if (filter === 'roadmaps') return e.kind === 'roadmap' && (q === '' || e.haystack.includes(q));
+      if (filter !== 'all' && e.subjectId !== filter) return false;
+      return q === '' || e.haystack.includes(q);
+    });
   }, [entries, query, filter]);
 
   return (
@@ -122,7 +122,7 @@ export default function SearchScreen() {
             style={styles.input}
             value={query}
             onChangeText={setQuery}
-            placeholder="Search lessons & topics…"
+            placeholder="Search lessons & roadmaps…"
             placeholderTextColor={colors.textFaint}
             autoFocus
             returnKeyType="search"
@@ -143,21 +143,24 @@ export default function SearchScreen() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chips}
       >
-        {(['all', ...subjects.map((s) => s.id)] as (SubjectId | 'all')[]).map((id) => {
-          const active = filter === id;
-          const label = id === 'all' ? 'All' : getSubject(id)?.title ?? id;
-          return (
-            <Pressable
-              key={id}
-              onPress={() => setFilter(id)}
-              style={[styles.chip, active && styles.chipActive]}
-            >
-              <Text style={[styles.chipText, active && { color: colors.bg }]}>
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
+        {(['all', 'roadmaps', ...subjects.map((s) => s.id)] as (SubjectId | 'all' | 'roadmaps')[]).map(
+          (id) => {
+            const active = filter === id;
+            const label =
+              id === 'all' ? 'All' : id === 'roadmaps' ? 'Roadmaps' : getSubject(id)?.title ?? id;
+            return (
+              <Pressable
+                key={id}
+                onPress={() => setFilter(id)}
+                style={[styles.chip, active && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, active && { color: colors.bg }]}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          },
+        )}
       </ScrollView>
 
       <ScrollView
@@ -167,35 +170,41 @@ export default function SearchScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.resultMeta}>
-          {results.length} lesson{results.length === 1 ? '' : 's'}
+          {results.length} result{results.length === 1 ? '' : 's'}
           {query ? ` matching “${query.trim()}”` : ''}
         </Text>
         {results.map((e) => (
           <Pressable
-            key={e.lessonId}
-            onPress={() => router.push(`/lesson/${e.lessonId}`)}
+            key={`${e.kind}-${e.id}`}
+            onPress={() =>
+              e.kind === 'roadmap'
+                ? router.push(`/roadmap/${e.id}`)
+                : router.push(`/lesson/${e.id}`)
+            }
             style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
           >
             <View style={[styles.rowIcon, { backgroundColor: e.accent }]}>
-              <Ionicons name={e.icon as any} size={16} color={colors.bg} />
+              <Ionicons name={e.icon as keyof typeof Ionicons.glyphMap} size={16} color={colors.bg} />
             </View>
             <View style={{ flex: 1 }}>
               <View style={styles.rowTitleRow}>
                 <Text style={styles.rowTitle} numberOfLines={1}>
                   {e.title}
                 </Text>
-                {e.generated ? (
+                {e.kind === 'lesson' ? (
                   <View style={styles.aiTag}>
                     <Ionicons name="sparkles" size={10} color={colors.primary} />
                     <Text style={styles.aiTagText}>AI</Text>
                   </View>
                 ) : null}
-                {isLessonComplete(e.lessonId) ? (
+                {e.kind === 'lesson' && isLessonComplete(e.id) ? (
                   <Ionicons name="checkmark-circle" size={15} color={colors.success} />
                 ) : null}
               </View>
               <Text style={styles.rowSub} numberOfLines={1}>
-                {e.subjectTitle} · {e.minutes} min · {e.cardCount} cards
+                {e.kind === 'roadmap'
+                  ? `${e.subtitle} · Roadmap`
+                  : `${e.subjectTitle} · ${e.minutes} min · ${e.cardCount} slides`}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
@@ -205,7 +214,7 @@ export default function SearchScreen() {
           <View style={styles.empty}>
             <Ionicons name="telescope-outline" size={40} color={colors.textFaint} />
             <Text style={styles.emptyText}>
-              No lessons found. Try another keyword — or generate one in Create.
+              No results found. Create a lesson or roadmap to start learning.
             </Text>
           </View>
         ) : null}

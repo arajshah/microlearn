@@ -29,4 +29,6 @@ export interface LessonGenerationContext {
   sourceContext?: RoadmapSourceContext;
   /** Relevant excerpt from URL source for this lesson node. */
   sourceExcerpt?: string;
+  /** Target slides when materializing this lesson from a roadmap. */
+  slidesPerLesson?: number;
 }

@@ -70,6 +70,7 @@ export async function buildLessonGenerationContext(
           unit.title,
         )
       : undefined,
+    slidesPerLesson: roadmap.slidesPerLesson,
   };
 }
 

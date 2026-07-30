@@ -2,13 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CardContent, Explanation, wasCardCorrect } from '@/components/CardView';
 import { useProgress } from '@/context/ProgressContext';
-import { allLessons, getSubject } from '@/data/courses';
-import { LessonCard } from '@/types/content';
+import { useLibrary } from '@/context/LibraryContext';
+import { getSubject } from '@/data/subjects';
+import { GeneratedLesson, LessonCard } from '@/types/content';
 import { isInteractiveCard } from '@/utils/cards';
 import { mulberry32, seedFromString, shuffle } from '@/utils/random';
 import { colors, font, radius, spacing } from '@/theme/theme';
@@ -23,12 +24,17 @@ interface LightningItem {
   subjectTitle: string;
 }
 
-function buildPool(): LightningItem[] {
+function buildPool(generatedLessons: GeneratedLesson[]): LightningItem[] {
   const pool: LightningItem[] = [];
-  for (const { subject, lesson } of allLessons()) {
+  for (const lesson of generatedLessons) {
+    const subject = getSubject(lesson.subjectId);
     lesson.cards.forEach((card) => {
       if (isInteractiveCard(card)) {
-        pool.push({ card, accent: subject.accent, subjectTitle: subject.title });
+        pool.push({
+          card,
+          accent: subject?.accent ?? colors.primary,
+          subjectTitle: subject?.title ?? 'AI',
+        });
       }
     });
   }
@@ -40,8 +46,9 @@ export default function LightningRound() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { awardXp } = useProgress();
+  const { generatedLessons } = useLibrary();
 
-  const pool = useRef(buildPool()).current;
+  const pool = useMemo(() => buildPool(generatedLessons), [generatedLessons]);
   const [poolIdx, setPoolIdx] = useState(0);
   const [timeLeft, setTimeLeft] = useState(DURATION_SEC);
   const [selected, setSelected] = useState<number | null>(null);
@@ -50,7 +57,7 @@ export default function LightningRound() {
   const [finished, setFinished] = useState(false);
   const awarded = useRef(false);
 
-  const item = pool[poolIdx % pool.length];
+  const item = pool.length > 0 ? pool[poolIdx % pool.length] : undefined;
   const card = item?.card;
 
   const endRound = useCallback(() => {
@@ -98,6 +105,22 @@ export default function LightningRound() {
       setRevealed(false);
     }, 700);
   };
+
+  if (pool.length === 0) {
+    return (
+      <LinearGradient
+        colors={['#1a0a2e', '#0E1525']}
+        style={[styles.screen, styles.center, { padding: spacing.xl }]}
+      >
+        <Ionicons name="flash-outline" size={56} color={colors.warning} />
+        <Text style={styles.doneTitle}>No questions yet</Text>
+        <Text style={styles.doneSub}>Create a lesson with quiz slides to play Lightning.</Text>
+        <Pressable onPress={() => router.back()} style={styles.doneBtn}>
+          <Text style={styles.doneBtnText}>Done</Text>
+        </Pressable>
+      </LinearGradient>
+    );
+  }
 
   if (finished || !card) {
     const xp = score * XP_PER_CORRECT;
@@ -189,7 +212,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.heavy as '800',
     marginTop: spacing.xl,
   },
-  doneSub: { color: colors.textMuted, fontSize: font.size.lg, marginTop: spacing.sm },
+  doneSub: { color: colors.textMuted, fontSize: font.size.lg, marginTop: spacing.sm, textAlign: 'center' },
   doneBtn: {
     backgroundColor: colors.warning,
     paddingVertical: spacing.lg,
