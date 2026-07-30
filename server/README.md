@@ -265,9 +265,11 @@ read-only **published** roadmaps from this server. When unset, the app behaves e
 before (AsyncStorage only). Server fetch failures fall back gracefully to local
 data; existing app-generated roadmaps are never removed.
 
-When the server has auth enabled, also set `EXPO_PUBLIC_MICROLEARN_API_TOKEN` so
-app requests include `Authorization: Bearer …`. This is **local/tunnel dev only**
-— Expo public env vars are visible in the client bundle, not production security.
+When the server has auth enabled, enter the bearer token in the app under
+**Settings → Microlearn Server**. It is stored in the device keychain via
+`expo-secure-store` and attached as `Authorization: Bearer …` at request time. The
+token is deliberately not an `EXPO_PUBLIC_*` env var, since Expo inlines those into
+the client bundle.
 
 Completed lessons optionally POST outcomes to `/api/outcomes` without blocking local
 completion if the server is unreachable.

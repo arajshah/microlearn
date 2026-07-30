@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AiError, testConnection } from '@/ai/client';
 import { PROVIDER_PRESETS } from '@/ai/providers';
 import { useLibrary } from '@/context/LibraryContext';
+import { clearApiToken, hasApiToken, saveApiToken } from '@/services/apiToken';
+import { isServerConfigured } from '@/services/microlearnServer';
 import { colors, font, radius, spacing } from '@/theme/theme';
 
 export default function SettingsScreen() {
@@ -31,6 +33,23 @@ export default function SettingsScreen() {
     { ok: boolean; message: string } | null
   >(null);
   const [saved, setSaved] = useState(false);
+
+  // Server bearer token. The field is write-only: we track whether a token exists
+  // but never read the stored value back into state.
+  const [serverToken, setServerToken] = useState('');
+  const [tokenPresent, setTokenPresent] = useState(false);
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [tokenNotice, setTokenNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    hasApiToken().then((present) => {
+      if (active) setTokenPresent(present);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const activePreset = PROVIDER_PRESETS.find((p) => p.baseUrl === baseUrl);
 
@@ -51,6 +70,27 @@ export default function SettingsScreen() {
     saveConfig({ baseUrl: baseUrl.trim(), model: model.trim(), apiKey: apiKey.trim() });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  };
+
+  const onSaveToken = async () => {
+    const value = serverToken.trim();
+    if (!value) return;
+    setTokenBusy(true);
+    const ok = await saveApiToken(value);
+    // Drop the plaintext from component state as soon as it is handed to the keychain.
+    setServerToken('');
+    setTokenPresent(ok);
+    setTokenNotice(ok ? 'Token saved to this device.' : 'Could not save token on this device.');
+    setTokenBusy(false);
+  };
+
+  const onClearToken = async () => {
+    setTokenBusy(true);
+    const ok = await clearApiToken();
+    setServerToken('');
+    if (ok) setTokenPresent(false);
+    setTokenNotice(ok ? 'Token removed from this device.' : 'Could not remove token.');
+    setTokenBusy(false);
   };
 
   const onTest = async () => {
@@ -222,6 +262,67 @@ export default function SettingsScreen() {
             clearing the field and saving.
           </Text>
         </View>
+
+        <View style={styles.divider} />
+
+        <Text style={styles.sectionTitle}>Microlearn Server</Text>
+        <Text style={styles.sectionHint}>
+          {isServerConfigured()
+            ? 'Bearer token used when your local server requires auth. It is written straight to the device keychain and never shown again.'
+            : 'Set EXPO_PUBLIC_MICROLEARN_API_BASE_URL to connect a local server. You can still save a token now for when it is configured.'}
+        </Text>
+
+        <Text style={styles.label}>API Token</Text>
+        <TextInput
+          value={serverToken}
+          onChangeText={setServerToken}
+          placeholder={tokenPresent ? 'a token is saved — type to replace' : 'paste your server token'}
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          textContentType="password"
+          style={styles.input}
+        />
+
+        <View style={styles.tokenStatus}>
+          <Ionicons
+            name={tokenPresent ? 'shield-checkmark' : 'shield-outline'}
+            size={14}
+            color={tokenPresent ? colors.success : colors.textFaint}
+          />
+          <Text style={styles.tokenStatusText}>
+            {tokenNotice ?? (tokenPresent ? 'A token is saved on this device.' : 'No token saved.')}
+          </Text>
+        </View>
+
+        <View style={styles.actions}>
+          <Pressable
+            onPress={onClearToken}
+            disabled={tokenBusy || !tokenPresent}
+            style={[styles.testBtn, (tokenBusy || !tokenPresent) && styles.btnDisabled]}
+          >
+            <Ionicons name="trash-outline" size={16} color={colors.text} />
+            <Text style={styles.testBtnText}>Clear</Text>
+          </Pressable>
+          <Pressable
+            onPress={onSaveToken}
+            disabled={tokenBusy || serverToken.trim().length === 0}
+            style={[
+              styles.saveBtn,
+              (tokenBusy || serverToken.trim().length === 0) && styles.btnDisabled,
+            ]}
+          >
+            {tokenBusy ? (
+              <ActivityIndicator color={colors.bg} />
+            ) : (
+              <>
+                <Ionicons name="lock-closed" size={16} color={colors.bg} />
+                <Text style={styles.saveBtnText}>Save token</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
       </ScrollView>
     </View>
   );
@@ -375,4 +476,35 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 17,
   },
+  divider: {
+    height: 1,
+    backgroundColor: colors.borderSoft,
+    marginTop: spacing.xxl,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: font.size.lg,
+    fontWeight: font.weight.heavy as '800',
+    marginTop: spacing.xl,
+  },
+  sectionHint: {
+    color: colors.textMuted,
+    fontSize: font.size.sm,
+    lineHeight: 20,
+    marginTop: spacing.sm,
+  },
+  tokenStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.sm,
+  },
+  tokenStatusText: {
+    color: colors.textMuted,
+    fontSize: font.size.xs,
+    flex: 1,
+    lineHeight: 17,
+  },
+  btnDisabled: { opacity: 0.5 },
 });

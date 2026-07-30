@@ -12,6 +12,7 @@
     "verify:lesson-rendering": "tsx scripts/verify-lesson-rendering.ts",
     "verify:heavy-generation": "tsx scripts/verify-heavy-lesson-generation.ts",
     "verify:adaptive-learning": "tsx scripts/verify-adaptive-learning.ts",
+    "verify:api-token": "tsx scripts/verify-api-token.ts",
     "reset:learning": "tsx scripts/reset-learning-data.ts learning",
     "reset:all-data": "tsx scripts/reset-learning-data.ts all",
     "server:dev": "tsx server/src/index.ts",

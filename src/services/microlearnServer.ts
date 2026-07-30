@@ -9,16 +9,19 @@ import {
   RoadmapUnit,
 } from '@/types/roadmap';
 import { normalizeRoadmapEntityIds } from '@/utils/roadmapIds';
+import { getApiToken } from '@/services/apiToken';
 
 /**
  * Optional client for the local Microlearn control server (Phase 4/5).
  * When EXPO_PUBLIC_MICROLEARN_API_BASE_URL is unset, every function no-ops so
  * the app's existing AsyncStorage behavior is completely unchanged.
+ *
+ * The bearer token is read from the device keychain at request time; see
+ * src/services/apiToken.ts.
  */
 
 const RAW_BASE = process.env.EXPO_PUBLIC_MICROLEARN_API_BASE_URL?.trim();
 const BASE_URL = RAW_BASE ? RAW_BASE.replace(/\/+$/, '') : '';
-const API_TOKEN = process.env.EXPO_PUBLIC_MICROLEARN_API_TOKEN?.trim() ?? '';
 const REQUEST_TIMEOUT_MS = 8000;
 
 const DEPTHS: RoadmapDepth[] = ['quick', 'standard', 'deep'];
@@ -36,9 +39,10 @@ export function isServerConfigured(): boolean {
   return BASE_URL.length > 0;
 }
 
-function authHeaders(): Record<string, string> {
+async function authHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (API_TOKEN) headers.Authorization = `Bearer ${API_TOKEN}`;
+  const token = await getApiToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
@@ -48,7 +52,7 @@ async function getJson<T>(path: string): Promise<T | null> {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
-      headers: authHeaders(),
+      headers: await authHeaders(),
       signal: controller.signal,
     });
     if (!res.ok) return null;
@@ -67,7 +71,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T | null> {
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -87,7 +91,7 @@ async function deleteJson<T>(path: string, body: unknown = {}): Promise<T | null
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'DELETE',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -224,7 +228,7 @@ async function getJsonDetailed<T>(
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
-      headers: authHeaders(),
+      headers: await authHeaders(),
       signal: controller.signal,
     });
     const json = (await res.json().catch(() => null)) as T | { error?: { message?: string } } | null;
@@ -295,7 +299,7 @@ async function deleteJsonDetailed<T>(
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'DELETE',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -468,7 +472,7 @@ async function patchJsonDetailed<T>(
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'PATCH',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -584,7 +588,7 @@ async function postJsonDetailed<T>(
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -642,7 +646,7 @@ export async function uploadDocumentSource(file: UploadDocumentFile): Promise<Ex
   try {
     const res = await fetch(`${BASE_URL}/api/sources/upload`, {
       method: 'POST',
-      headers: authHeaders(),
+      headers: await authHeaders(),
       body: formData,
       signal: controller.signal,
     });
@@ -765,7 +769,7 @@ async function patchJson<T>(path: string, body: unknown): Promise<T | null> {
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'PATCH',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
