@@ -2,7 +2,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolContext } from '../context';
 import { runTool } from '../toolSchemas';
 import { runAuditedTool, type AuditedToolSpec } from '../../audit/auditRun';
-import { assertConfirmation, assertWriteEnabled } from '../guards';
+import { assertWriteEnabled } from '../guards';
+import { assertConfirmationOrTrusted } from '../trustedAuthorization';
 import * as repo from '../../curriculum/curriculumRepository';
 import * as S from './curriculumSchemas';
 
@@ -184,7 +185,7 @@ export function registerCurriculumTools(server: McpServer, ctx: ToolContext): vo
         ctx,
         { action: 'delete_unit', entityType: 'roadmap_unit', toolName: 'delete_unit', entityId: () => args.unitId, args },
         () => {
-          assertConfirmation(args.confirm, CONFIRM_DELETE_UNIT);
+          assertConfirmationOrTrusted(ctx, 'delete_unit', args, args.confirm, CONFIRM_DELETE_UNIT);
           return repo.deleteUnit(db, args);
         },
       ),
@@ -253,7 +254,7 @@ export function registerCurriculumTools(server: McpServer, ctx: ToolContext): vo
           args,
         },
         () => {
-          assertConfirmation(args.confirm, CONFIRM_DELETE_NODE);
+          assertConfirmationOrTrusted(ctx, 'delete_lesson_node', args, args.confirm, CONFIRM_DELETE_NODE);
           return repo.deleteLessonNode(db, args);
         },
       ),
@@ -388,7 +389,7 @@ export function registerCurriculumTools(server: McpServer, ctx: ToolContext): vo
           args,
         },
         () => {
-          assertConfirmation(args.confirm, CONFIRM_PUBLISH);
+          assertConfirmationOrTrusted(ctx, 'publish_version', args, args.confirm, CONFIRM_PUBLISH);
           return repo.publishVersion(db, args.roadmapId, args.changeSummary);
         },
       ),
@@ -413,7 +414,7 @@ export function registerCurriculumTools(server: McpServer, ctx: ToolContext): vo
           args,
         },
         () => {
-          assertConfirmation(args.confirm, CONFIRM_ROLLBACK);
+          assertConfirmationOrTrusted(ctx, 'rollback_version', args, args.confirm, CONFIRM_ROLLBACK);
           return { roadmap: repo.rollbackVersion(db, args.roadmapId, args.versionId, args.changeSummary) };
         },
       ),

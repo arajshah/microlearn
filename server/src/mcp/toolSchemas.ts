@@ -88,6 +88,26 @@ export const TOOL_CATALOG: ReadonlyArray<{ name: string; description: string }> 
   { name: 'create_remediation_lesson', description: 'Queue a remediation item for a weak concept (confirmation required).' },
   { name: 'build_learning_snapshot', description: 'Build and store a compact learning snapshot (current_state/daily/roadmap).' },
   { name: 'list_remediation_queue', description: 'List remediation queue items ordered by severity.' },
+  // Trusted Automation: application-data authority only. Never covers repository, Git, shell, or infrastructure operations.
+  { name: 'enable_trusted_automation', description: 'Create a persistent Trusted Automation grant after structured confirmation.' },
+  { name: 'get_trusted_automation_status', description: 'Return the current client-bound Trusted Automation grant and circuit-breaker status.' },
+  { name: 'update_trusted_automation', description: 'Update grant limits, windows, roadmap restrictions, or capabilities.' },
+  { name: 'pause_trusted_automation', description: 'Pause the current Trusted Automation grant.' },
+  { name: 'revoke_trusted_automation', description: 'Permanently revoke the current Trusted Automation grant.' },
+  { name: 'delete_roadmap', description: 'Transactionally soft-delete a roadmap and pause dependent automation.' },
+  { name: 'recalculate_achievements', description: 'Recalculate earned achievement records from stored application evidence.' },
+  { name: 'list_automation_schedules', description: 'List persistent automation schedules for the authenticated user.' },
+  { name: 'create_automation_schedule', description: 'Create an idempotent persistent Microlearn automation schedule.' },
+  { name: 'update_automation_schedule', description: 'Update an existing automation schedule.' },
+  { name: 'pause_automation_schedule', description: 'Pause an automation schedule.' },
+  { name: 'resume_automation_schedule', description: 'Resume an automation schedule and calculate its next run.' },
+  { name: 'delete_automation_schedule', description: 'Delete an automation schedule after structured confirmation.' },
+  { name: 'list_automation_reminders', description: 'List persistent in-app, local, or push reminder records.' },
+  { name: 'create_automation_reminder', description: 'Create a persistent Microlearn reminder.' },
+  { name: 'update_automation_reminder', description: 'Update a persistent Microlearn reminder.' },
+  { name: 'pause_automation_reminder', description: 'Pause a reminder.' },
+  { name: 'resume_automation_reminder', description: 'Resume a reminder.' },
+  { name: 'delete_automation_reminder', description: 'Delete a reminder after structured confirmation.' },
 ];
 
 export const TOOL_COUNT = TOOL_CATALOG.length;

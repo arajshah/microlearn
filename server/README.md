@@ -444,6 +444,34 @@ POST /api/activity              # { eventType, event }
 
 Read: `get_gamification_summary`, `list_achievements`, `inspect_daily_activity`
 
+## Trusted Automation and worker
+
+Migration `0009_trusted_automation` adds persistent, user/client-bound grants, schedules,
+job executions, reminders, notification jobs, and automation audit events. The migration
+is applied transactionally by normal server startup and is safe to apply to an existing
+database; production migration should still be preceded by the existing SQLite backup.
+
+Trusted Automation never authorizes repository files, Git, shell commands, secrets,
+deployment, authentication, or infrastructure tools. Application mutations continue to
+require their OAuth scopes. A trusted grant is additionally checked on every authorized
+call for status, client/user identity, capability, roadmap scope, execution window,
+expiration, daily limit, and circuit-breaker state.
+
+The worker supports only fixed Microlearn job types: learning snapshots, achievement
+recalculation from stored evidence, duplicate-safe review queue creation, roadmap health
+checks, and reminder delivery records. It revalidates the grant at execution time.
+
+```bash
+npm run server:worker       # development, via tsx
+npm run server:worker:start # compiled server/dist/worker.js
+```
+
+For a later VM deployment: back up the database, build with `npm run server:build`, start
+the API so migration `0009` is applied, then configure a separate process supervisor or
+systemd unit using the same working directory and environment as the API with
+`ExecStart=node server/dist/worker.js`. Do not run multiple workers against the same
+database until distributed claiming is added. No VM service is created by this repository.
+
 Write: `record_activity_event` (requires `MICROLEARN_ENABLE_WRITE_TOOLS=true`)
 
 **Achievement categories:** retrieval, consistency, roadmap, mastery, comeback, creation (16 seeded definitions).

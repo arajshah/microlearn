@@ -22,8 +22,11 @@ import { registerSourceTools } from './tools/sourceTools';
 import { registerRetrievalTools } from './tools/retrievalTools';
 import { registerGamificationTools } from './tools/gamificationTools';
 import { registerAdaptiveTools } from './tools/adaptiveTools';
+import { registerAutomationTools } from './tools/automationTools';
 import { getMcpAuthContext, sendMcpInsufficientScope } from '../auth/mcpAuth';
 import { missingMcpScopes, requiredScopesForMcpRequest } from './scopePolicy';
+import { preauthorizeTrustedMutations } from './trustedAuthorization';
+import { ToolError } from './repoSafety';
 
 const MCP_SERVER_NAME = 'microlearn-local-mcp';
 const MCP_SERVER_VERSION = '0.1.0';
@@ -50,6 +53,7 @@ function buildMcpServer(ctx: ToolContext): McpServer {
   registerRetrievalTools(server, ctx);
   registerGamificationTools(server, ctx);
   registerAdaptiveTools(server, ctx);
+  registerAutomationTools(server, ctx);
 
   return server;
 }
@@ -69,7 +73,6 @@ function methodNotAllowed(res: Response): void {
  */
 export function createMcpRouter(config: ServerConfig, db: Db): Router {
   assertRepoRoot(config.repoRoot);
-  const ctx: ToolContext = { config, db, repoRoot: config.repoRoot };
   const router = Router();
 
   logger.info('MCP endpoint mounted', {
@@ -89,6 +92,23 @@ export function createMcpRouter(config: ServerConfig, db: Db): Router {
       }
     }
 
+    const ctx: ToolContext = {
+      config,
+      db,
+      repoRoot: config.repoRoot,
+      auth: getMcpAuthContext(res),
+    };
+    try {
+      preauthorizeTrustedMutations(ctx, req.body);
+    } catch (error) {
+      const code = error instanceof ToolError ? error.code : 'AUTOMATION_NOT_ALLOWED';
+      res.status(403).json({
+        jsonrpc: '2.0',
+        error: { code: -32002, message: 'Trusted Automation authorization rejected this mutation.', data: { code } },
+        id: requirement?.id ?? null,
+      });
+      return;
+    }
     const server = buildMcpServer(ctx);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

@@ -14,10 +14,13 @@
     "verify:adaptive-learning": "tsx scripts/verify-adaptive-learning.ts",
     "verify:api-token": "tsx scripts/verify-api-token.ts",
     "verify:mcp-oauth": "tsx scripts/verify-mcp-oauth.ts",
+    "verify:trusted-automation": "tsx scripts/verify-trusted-automation.ts",
     "reset:learning": "tsx scripts/reset-learning-data.ts learning",
     "reset:all-data": "tsx scripts/reset-learning-data.ts all",
     "server:dev": "tsx server/src/index.ts",
     "server:start": "node server/dist/index.js",
+    "server:worker": "tsx server/src/worker.ts",
+    "server:worker:start": "node server/dist/worker.js",
     "server:build": "tsc -p server/tsconfig.json",
     "server:typecheck": "tsc -p server/tsconfig.json --noEmit",
     "server:tunnel": "cloudflared tunnel --url http://localhost:3000"

@@ -931,6 +931,7 @@ export interface ServerAchievement {
   accent?: string;
   unlocked: boolean;
   unlockedAt?: string;
+  progressValue?: number;
 }
 
 export interface ServerDailyActivity {

@@ -549,4 +549,142 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_learning_snapshots_created ON learning_snapshots(created_at);
     `,
   },
+  {
+    id: '0009_trusted_automation',
+    sql: `
+      CREATE TABLE IF NOT EXISTS trusted_automation_grants (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        oauth_client_id TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        capabilities_json TEXT NOT NULL,
+        roadmap_ids_json TEXT,
+        daily_operation_limit INTEGER,
+        daily_operation_count INTEGER NOT NULL DEFAULT 0,
+        daily_operation_day TEXT,
+        execution_windows_json TEXT,
+        timezone TEXT NOT NULL DEFAULT 'UTC',
+        expires_at TEXT,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        circuit_breaker_state TEXT NOT NULL DEFAULT 'closed',
+        circuit_breaker_reason TEXT,
+        allow_whole_roadmap_delete INTEGER NOT NULL DEFAULT 0,
+        allow_badge_definition_changes INTEGER NOT NULL DEFAULT 0,
+        audit_metadata_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_used_at TEXT
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_trusted_grants_identity_active
+        ON trusted_automation_grants(user_id, IFNULL(oauth_client_id, ''))
+        WHERE status IN ('active', 'paused', 'circuit-broken');
+      CREATE INDEX IF NOT EXISTS idx_trusted_grants_status
+        ON trusted_automation_grants(status, expires_at);
+
+      CREATE TABLE IF NOT EXISTS automation_schedules (
+        id TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        job_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        schedule_type TEXT NOT NULL,
+        schedule_json TEXT NOT NULL,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        timezone TEXT NOT NULL DEFAULT 'UTC',
+        next_run_at TEXT,
+        last_run_at TEXT,
+        retry_limit INTEGER NOT NULL DEFAULT 3,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (grant_id) REFERENCES trusted_automation_grants(id) ON DELETE CASCADE
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_schedule_idempotency
+        ON automation_schedules(grant_id, idempotency_key);
+      CREATE INDEX IF NOT EXISTS idx_automation_schedule_due
+        ON automation_schedules(status, next_run_at);
+
+      CREATE TABLE IF NOT EXISTS automation_job_executions (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL,
+        grant_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        scheduled_for TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        result_json TEXT,
+        error_code TEXT,
+        FOREIGN KEY (schedule_id) REFERENCES automation_schedules(id) ON DELETE CASCADE,
+        FOREIGN KEY (grant_id) REFERENCES trusted_automation_grants(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_automation_executions_schedule
+        ON automation_job_executions(schedule_id, started_at);
+
+      CREATE TABLE IF NOT EXISTS automation_reminders (
+        id TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        roadmap_id TEXT,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'in_app',
+        status TEXT NOT NULL DEFAULT 'active',
+        timezone TEXT NOT NULL DEFAULT 'UTC',
+        schedule_json TEXT NOT NULL,
+        next_trigger_at TEXT,
+        last_triggered_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (grant_id) REFERENCES trusted_automation_grants(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_automation_reminders_due
+        ON automation_reminders(status, next_trigger_at);
+
+      CREATE TABLE IF NOT EXISTS notification_jobs (
+        id TEXT PRIMARY KEY,
+        reminder_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        status TEXT NOT NULL,
+        scheduled_for TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (reminder_id) REFERENCES automation_reminders(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_notification_jobs_status
+        ON notification_jobs(status, scheduled_for);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_jobs_idempotency
+        ON notification_jobs(reminder_id, scheduled_for);
+
+      CREATE TABLE IF NOT EXISTS automation_audit_events (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        oauth_client_id TEXT,
+        grant_id TEXT,
+        job_id TEXT,
+        tool_name TEXT NOT NULL,
+        target_ids_json TEXT,
+        capability TEXT,
+        result TEXT NOT NULL,
+        before_json TEXT,
+        after_json TEXT,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_automation_audit_grant
+        ON automation_audit_events(grant_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_automation_audit_tool
+        ON automation_audit_events(tool_name, created_at);
+    `,
+  },
 ];

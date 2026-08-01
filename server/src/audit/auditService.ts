@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Db } from '../db';
 
 const MAX_SNAPSHOT_CHARS = 16_000;
+const SENSITIVE_KEY = /token|secret|password|authorization|credential|bearer|jwt/i;
 
 export interface AuditEventRow {
   id: string;
@@ -32,7 +33,20 @@ export function sanitizeAuditPayload(value: unknown): unknown {
     return value.length > MAX_SNAPSHOT_CHARS ? `${value.slice(0, MAX_SNAPSHOT_CHARS)}…[truncated]` : value;
   }
   try {
-    const json = JSON.stringify(value);
+    const seen = new WeakSet<object>();
+    const redact = (item: unknown, depth: number): unknown => {
+      if (depth > 10) return '[truncated-depth]';
+      if (Array.isArray(item)) return item.map((entry) => redact(entry, depth + 1));
+      if (!item || typeof item !== 'object') return item;
+      if (seen.has(item)) return '[circular]';
+      seen.add(item);
+      return Object.fromEntries(Object.entries(item as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        SENSITIVE_KEY.test(key) ? '[redacted]' : redact(entry, depth + 1),
+      ]));
+    };
+    const redacted = redact(value, 0);
+    const json = JSON.stringify(redacted);
     if (json.length <= MAX_SNAPSHOT_CHARS) {
       return JSON.parse(json);
     }

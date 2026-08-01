@@ -3,7 +3,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolContext } from '../context';
 import { runTool } from '../toolSchemas';
 import { runAuditedTool } from '../../audit/auditRun';
-import { assertConfirmation, assertWriteEnabled } from '../guards';
+import { assertWriteEnabled } from '../guards';
+import { assertConfirmationOrTrusted } from '../trustedAuthorization';
 import { createLesson, createRoadmap } from '../../curriculum/curriculumRepository';
 import {
   extractDocumentSourceTool,
@@ -100,7 +101,7 @@ export function registerSourceTools(server: McpServer, ctx: ToolContext): void {
         },
         () => {
           assertWriteEnabled(ctx.config);
-          assertConfirmation(args.confirm ?? '', CONFIRM_ROADMAP);
+          assertConfirmationOrTrusted(ctx, 'create_roadmap_from_source', args, args.confirm, CONFIRM_ROADMAP);
           const source = requireReadySource(db, args.sourceId);
           const draft = buildDraftRoadmapFromSource(source, {
             title: args.title,
@@ -139,7 +140,7 @@ export function registerSourceTools(server: McpServer, ctx: ToolContext): void {
         },
         () => {
           assertWriteEnabled(ctx.config);
-          assertConfirmation(args.confirm ?? '', CONFIRM_LESSON);
+          assertConfirmationOrTrusted(ctx, 'create_lesson_from_source', args, args.confirm, CONFIRM_LESSON);
           const source = requireReadySource(db, args.sourceId);
           const lessonNodeId = randomUUID();
           const roadmapInput = buildSingleLessonRoadmapInput(source, lessonNodeId, {

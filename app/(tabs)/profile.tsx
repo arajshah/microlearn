@@ -19,6 +19,7 @@ import { useBookmarks } from '@/context/BookmarksContext';
 import { useChallenge } from '@/context/ChallengeContext';
 import { useProgress } from '@/context/ProgressContext';
 import { deriveAchievements } from '@/data/achievements';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { subjects } from '@/data/courses';
 import {
   getAchievements,
@@ -34,6 +35,7 @@ const XP_PER_LEVEL = 150;
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const reduceMotion = useReducedMotion();
   const { count: savedCount } = useBookmarks();
   const { completedCount: challengeCount } = useChallenge();
   const {
@@ -185,21 +187,19 @@ export default function ProfileScreen() {
         />
         <View style={styles.badgeGrid}>
           {badgeList
-            ? badgeList.map((a) => <AchievementBadgeCard key={a.id} achievement={a} />)
-            : localAchievements.slice(0, 6).map((a) => (
-                <View
+            ? badgeList.map((a) => (
+                <AchievementBadgeCard
                   key={a.id}
-                  style={[styles.localBadge, a.unlocked ? styles.localUnlocked : styles.localLocked]}
-                >
-                  <Ionicons
-                    name={a.icon}
-                    size={22}
-                    color={a.unlocked ? colors.xp : colors.textFaint}
-                  />
-                  <Text style={styles.localBadgeTitle} numberOfLines={2}>
-                    {a.title}
-                  </Text>
-                </View>
+                  achievement={a}
+                  reduceMotion={reduceMotion}
+                />
+              ))
+            : localAchievements.slice(0, 6).map((a) => (
+                <AchievementBadgeCard
+                  key={a.id}
+                  achievement={a}
+                  reduceMotion={reduceMotion}
+                />
               ))}
         </View>
       </View>
@@ -334,18 +334,6 @@ const styles = StyleSheet.create({
   levelSub: { color: colors.textMuted, fontSize: font.size.sm },
   section: { gap: spacing.md },
   badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  localBadge: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    minWidth: 0,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    gap: spacing.sm,
-  },
-  localUnlocked: { backgroundColor: colors.surface, borderColor: colors.xp },
-  localLocked: { backgroundColor: colors.bgElevated, borderColor: colors.borderSoft },
-  localBadgeTitle: { color: colors.text, fontSize: font.size.sm, fontWeight: font.weight.bold as '700' },
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',

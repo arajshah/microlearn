@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     'microlearn:write',
     'microlearn:destructive',
   ]);
-  assert.deepEqual(MCP_TOOL_POLICY_COUNTS, { read: 40, write: 35, destructive: 19 });
+  assert.deepEqual(MCP_TOOL_POLICY_COUNTS, { read: 43, write: 51, destructive: 25 });
   assert.deepEqual(requiredScopesForTool('future_unclassified_tool'), [
     'microlearn:write',
     'microlearn:destructive',

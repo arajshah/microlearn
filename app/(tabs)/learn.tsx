@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ProgressBar } from '@/components/ProgressBar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   AppScreen,
   EmptyState,
@@ -74,6 +75,7 @@ function RoadmapListCard({
 }
 
 export default function LearnScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { subjectProgress } = useProgress();
   const { interests } = usePreferences();
@@ -147,8 +149,10 @@ export default function LearnScreen() {
           <RefreshControl
             refreshing={refreshingRoadmaps}
             onRefresh={requestRoadmapRefresh}
-            tintColor={colors.paths}
-            colors={[colors.paths]}
+            tintColor={colors.white}
+            colors={[colors.white, colors.paths]}
+            progressBackgroundColor={colors.surfaceAlt}
+            progressViewOffset={insets.top + spacing.sm}
           />
         ),
       }}

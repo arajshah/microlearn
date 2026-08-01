@@ -4,6 +4,7 @@ import type { ToolContext } from '../context';
 import { runTool } from '../toolSchemas';
 import { ToolError } from '../repoSafety';
 import { assertWriteEnabled } from '../guards';
+import { assertConfirmationOrTrusted } from '../trustedAuthorization';
 import { listLearningEvents } from '../../adaptive/events';
 import { listConceptMastery, listWeaknesses } from '../../adaptive/mastery';
 import { createDiagnosticSession } from '../../adaptive/diagnostics';
@@ -183,12 +184,7 @@ export function registerAdaptiveTools(server: McpServer, ctx: ToolContext): void
     async (args) =>
       runTool(() => {
         assertWriteEnabled(ctx.config);
-        if (args.confirm !== CREATE_DIAGNOSTIC_CONFIRM) {
-          throw new ToolError(
-            'CONFIRMATION_REQUIRED',
-            `Set confirm to "${CREATE_DIAGNOSTIC_CONFIRM}" to create a diagnostic session.`,
-          );
-        }
+        assertConfirmationOrTrusted(ctx, 'create_diagnostic_for_roadmap', args, args.confirm, CREATE_DIAGNOSTIC_CONFIRM);
         const session = createDiagnosticSession(ctx.db, {
           roadmapId: args.roadmapId,
           conceptCount: args.conceptCount ?? 5,
@@ -218,12 +214,7 @@ export function registerAdaptiveTools(server: McpServer, ctx: ToolContext): void
     async (args) =>
       runTool(() => {
         assertWriteEnabled(ctx.config);
-        if (args.confirm !== CREATE_REMEDIATION_CONFIRM) {
-          throw new ToolError(
-            'CONFIRMATION_REQUIRED',
-            `Set confirm to "${CREATE_REMEDIATION_CONFIRM}" to queue a remediation lesson.`,
-          );
-        }
+        assertConfirmationOrTrusted(ctx, 'create_remediation_lesson', args, args.confirm, CREATE_REMEDIATION_CONFIRM);
         const conceptSlug = normalizeConceptSlug(args.conceptSlug);
         if (!conceptSlug) throw new ToolError('INVALID_INPUT', 'conceptSlug could not be normalized.');
 
