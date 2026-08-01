@@ -56,7 +56,6 @@ export default function ProfileScreen() {
   const refreshProfile = useCallback(async () => {
     setPanelRefreshToken((value) => value + 1);
     if (serverEnabled) {
-      setServerLoading(true);
       try {
         const [summary, achievements] = await Promise.all([
           getProfileSummary(),

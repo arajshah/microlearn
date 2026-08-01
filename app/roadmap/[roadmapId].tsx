@@ -90,9 +90,11 @@ export default function RoadmapScreen() {
     setDiagnosticDone(sessions.length > 0);
   }, [refreshRoadmapById, roadmapId]);
 
-  const { refreshing: refreshingRoadmap, refresh } = useScreenRefresh(refreshRoadmapScreen, {
-    enabled: Boolean(roadmapId),
-  });
+  const {
+    refreshing: refreshingRoadmap,
+    isRefreshing: isRefreshingRoadmap,
+    refresh,
+  } = useScreenRefresh(refreshRoadmapScreen, { enabled: Boolean(roadmapId) });
 
   const handleContinue = useCallback(async () => {
     if (!roadmapId || continueLoading) return;
@@ -174,11 +176,11 @@ export default function RoadmapScreen() {
     }
   };
 
-  if (!hydrated || (refreshingRoadmap && !roadmap)) {
+  if (!hydrated || (isRefreshingRoadmap && !roadmap)) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
         <ActivityIndicator color={colors.primary} />
-        {refreshingRoadmap ? (
+        {isRefreshingRoadmap ? (
           <Text style={styles.loadingText}>Loading learning path…</Text>
         ) : null}
       </View>
@@ -229,7 +231,7 @@ export default function RoadmapScreen() {
           roadmap={roadmap}
           onContinue={() => void handleContinue()}
           continueLoading={continueLoading}
-          continueDisabled={continueLoading || (!roadmap && refreshingRoadmap)}
+          continueDisabled={continueLoading || (!roadmap && isRefreshingRoadmap)}
         />
 
         {showDiagnosticPrompt ? (

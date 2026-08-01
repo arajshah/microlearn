@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ProgressBar } from '@/components/ProgressBar';
@@ -18,6 +18,7 @@ import { subjects } from '@/data/subjects';
 import { SubjectId } from '@/types/content';
 import { continueNode, roadmapStats } from '@/utils/roadmapProgress';
 import { colors, font, gradients, radius, shadow, spacing } from '@/theme/theme';
+import { useScreenRefresh } from '@/hooks/useScreenRefresh';
 
 function RoadmapListCard({
   title,
@@ -80,21 +81,12 @@ export default function LearnScreen() {
   const {
     roadmaps,
     hydrated: roadmapsHydrated,
-    refreshingRoadmaps,
     lastOpenedRoadmap,
     deleteRoadmap,
     refreshRoadmaps,
   } = useRoadmaps();
 
-  const requestRoadmapRefresh = useCallback(() => {
-    void refreshRoadmaps().catch(() => {});
-  }, [refreshRoadmaps]);
-
-  useFocusEffect(
-    useCallback(() => {
-      requestRoadmapRefresh();
-    }, [requestRoadmapRefresh]),
-  );
+  const { refreshing, refresh } = useScreenRefresh(refreshRoadmaps);
 
   const orderedSubjects = useMemo(
     () =>
@@ -143,8 +135,8 @@ export default function LearnScreen() {
       scroll
       contentStyle={styles.content}
       refresh={{
-        refreshing: refreshingRoadmaps,
-        onRefresh: refreshRoadmaps,
+        refreshing,
+        onRefresh: refresh,
         accent: colors.paths,
       }}
     >

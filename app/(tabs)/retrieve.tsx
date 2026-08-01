@@ -73,7 +73,6 @@ export default function RetrieveScreen() {
       setServerLoading(false);
       return;
     }
-    setServerLoading(true);
     try {
       const [deletedReviewSets, deletedItems, due, summary, schedule, activityDays] = await Promise.all([
         readDeletedReviewSetIds(),
