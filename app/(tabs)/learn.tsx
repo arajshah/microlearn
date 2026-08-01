@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ProgressBar } from '@/components/ProgressBar';
 import {
   AppScreen,
@@ -77,7 +77,24 @@ export default function LearnScreen() {
   const router = useRouter();
   const { subjectProgress } = useProgress();
   const { interests } = usePreferences();
-  const { roadmaps, hydrated: roadmapsHydrated, lastOpenedRoadmap, deleteRoadmap } = useRoadmaps();
+  const {
+    roadmaps,
+    hydrated: roadmapsHydrated,
+    refreshingRoadmaps,
+    lastOpenedRoadmap,
+    deleteRoadmap,
+    refreshRoadmaps,
+  } = useRoadmaps();
+
+  const requestRoadmapRefresh = useCallback(() => {
+    void refreshRoadmaps().catch(() => {});
+  }, [refreshRoadmaps]);
+
+  useFocusEffect(
+    useCallback(() => {
+      requestRoadmapRefresh();
+    }, [requestRoadmapRefresh]),
+  );
 
   const orderedSubjects = useMemo(
     () =>
@@ -122,7 +139,20 @@ export default function LearnScreen() {
   };
 
   return (
-    <AppScreen scroll contentStyle={styles.content}>
+    <AppScreen
+      scroll
+      contentStyle={styles.content}
+      scrollProps={{
+        refreshControl: (
+          <RefreshControl
+            refreshing={refreshingRoadmaps}
+            onRefresh={requestRoadmapRefresh}
+            tintColor={colors.paths}
+            colors={[colors.paths]}
+          />
+        ),
+      }}
+    >
       <View style={styles.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.title}>Paths</Text>

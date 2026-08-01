@@ -59,6 +59,7 @@ const DEFAULT_SUBJECT = 'computer-science';
 interface RoadmapContextValue {
   roadmaps: GeneratedRoadmap[];
   hydrated: boolean;
+  refreshingRoadmaps: boolean;
   syncPending: boolean;
   generatingRoadmap: boolean;
   lastOpenedRoadmap: GeneratedRoadmap | undefined;
@@ -99,12 +100,15 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const [deletedRoadmapIds, setDeletedRoadmapIds] = useState<string[]>([]);
   const [lastOpenedRoadmapId, setLastOpenedRoadmapIdState] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [refreshingRoadmaps, setRefreshingRoadmaps] = useState(false);
   const [syncPending, setSyncPending] = useState(false);
   const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
   const [pregenActive, setPregenActive] = useState(false);
   const roadmapsRef = useRef<GeneratedRoadmap[]>([]);
   const deletedRoadmapIdsRef = useRef<string[]>([]);
   const pregenInFlight = useRef<Set<string>>(new Set());
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const appStateRef = useRef(AppState.currentState);
 
   useEffect(() => {
     roadmapsRef.current = roadmaps;
@@ -126,7 +130,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const refreshRoadmaps = useCallback(async () => {
+  const performRoadmapRefresh = useCallback(async () => {
     const pending = await readPendingMutations();
     const cached = await loadRoadmapsFromCache(pending);
     const merged = await refreshRoadmapsFromBackend(cached.roadmaps, cached.deletedIds, pending);
@@ -149,13 +153,32 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyRoadmaps]);
 
+  const refreshRoadmaps = useCallback((): Promise<void> => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+
+    setRefreshingRoadmaps(true);
+    const request = performRoadmapRefresh().finally(() => {
+      if (refreshInFlight.current === request) {
+        refreshInFlight.current = null;
+        setRefreshingRoadmaps(false);
+      }
+    });
+    refreshInFlight.current = request;
+    return request;
+  }, [performRoadmapRefresh]);
+
   useEffect(() => {
-    refreshRoadmaps().finally(() => setHydrated(true));
+    void refreshRoadmaps()
+      .catch(() => {})
+      .finally(() => setHydrated(true));
   }, [refreshRoadmaps]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refreshRoadmaps();
+      const wasBackgrounded =
+        appStateRef.current === 'background' || appStateRef.current === 'inactive';
+      appStateRef.current = state;
+      if (wasBackgrounded && state === 'active') void refreshRoadmaps().catch(() => {});
     });
     return () => sub.remove();
   }, [refreshRoadmaps]);
@@ -535,6 +558,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     () => ({
       roadmaps,
       hydrated,
+      refreshingRoadmaps,
       syncPending,
       generatingRoadmap,
       pregenActive,
@@ -553,6 +577,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     [
       roadmaps,
       hydrated,
+      refreshingRoadmaps,
       syncPending,
       generatingRoadmap,
       pregenActive,
