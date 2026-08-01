@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolContext } from '../context';
 import { runTool } from '../toolSchemas';
 import { ToolError } from '../repoSafety';
+import { assertWriteEnabled } from '../guards';
 import { listLearningEvents } from '../../adaptive/events';
 import { listConceptMastery, listWeaknesses } from '../../adaptive/mastery';
 import { createDiagnosticSession } from '../../adaptive/diagnostics';
@@ -181,6 +182,7 @@ export function registerAdaptiveTools(server: McpServer, ctx: ToolContext): void
     },
     async (args) =>
       runTool(() => {
+        assertWriteEnabled(ctx.config);
         if (args.confirm !== CREATE_DIAGNOSTIC_CONFIRM) {
           throw new ToolError(
             'CONFIRMATION_REQUIRED',
@@ -215,6 +217,7 @@ export function registerAdaptiveTools(server: McpServer, ctx: ToolContext): void
     },
     async (args) =>
       runTool(() => {
+        assertWriteEnabled(ctx.config);
         if (args.confirm !== CREATE_REMEDIATION_CONFIRM) {
           throw new ToolError(
             'CONFIRMATION_REQUIRED',
@@ -258,6 +261,7 @@ export function registerAdaptiveTools(server: McpServer, ctx: ToolContext): void
     },
     async (args) =>
       runTool(() => {
+        assertWriteEnabled(ctx.config);
         if (args.type === 'roadmap' && !args.roadmapId) {
           throw new ToolError('INVALID_INPUT', 'roadmapId is required for roadmap snapshots.');
         }

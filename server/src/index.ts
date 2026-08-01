@@ -5,7 +5,12 @@ import { logger } from './logger';
 import { createHealthRouter } from './routes/health';
 import { createMcpRouter } from './mcp/mcpServer';
 import { createApiRouter } from './api/router';
-import { requireBearerToken } from './auth/bearerAuth';
+import { isOAuthConfigured } from './config';
+import {
+  createMcpAuthMiddleware,
+  createProtectedResourceMetadataRouter,
+  isMcpAuthenticationRequired,
+} from './auth/mcpAuth';
 
 function main(): void {
   const config = loadConfig();
@@ -15,14 +20,14 @@ function main(): void {
   app.use(express.json({ limit: '4mb' }));
 
   app.use(createHealthRouter(config, db));
+  app.use(createProtectedResourceMetadataRouter(config));
   app.use('/api', createApiRouter(config, db));
 
   const mcpRouter = createMcpRouter(config, db);
-  if (config.requireAuth) {
-    app.use(requireBearerToken(config.mcpBearerToken), mcpRouter);
-  } else {
-    app.use(mcpRouter);
+  if (isMcpAuthenticationRequired(config)) {
+    app.use('/mcp', createMcpAuthMiddleware(config));
   }
+  app.use(mcpRouter);
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({ ok: false, error: 'Not found' });
@@ -45,6 +50,7 @@ function main(): void {
       writeTools: config.enableWriteTools,
       gitPush: config.enableGitPush,
       requireAuth: config.requireAuth,
+      oauthResourceServer: isOAuthConfigured(config),
     });
   });
 

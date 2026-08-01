@@ -1,9 +1,8 @@
 # Microlearn Local Control Server
 
-A small local Node/TypeScript backend that runs **separately** from the Expo dev
-server. It currently exposes a single `/health` endpoint backed by Express and a
-local SQLite database. Later phases will add MCP tools, REST endpoints, and
-controlled repository operations — none of that exists yet.
+A Node/TypeScript backend that runs **separately** from the Expo dev server. It
+exposes health checks, a REST API, and a stateless Streamable HTTP MCP endpoint
+backed by a local SQLite database.
 
 > This server is for **local development only**. Do not deploy it or expose it
 > permanently.
@@ -120,7 +119,7 @@ It should match the localhost response.
   **Streamable HTTP**, not SSE. Quick Tunnels may not proxy long-lived SSE
   streams reliably, whereas Streamable HTTP works well over a Quick Tunnel.
 
-## MCP endpoint (read-only repo inspection)
+## MCP endpoint
 
 The server exposes a Model Context Protocol endpoint over **Streamable HTTP**
 (not SSE) at:
@@ -129,9 +128,8 @@ The server exposes a Model Context Protocol endpoint over **Streamable HTTP**
 POST /mcp
 ```
 
-It is **read-only**: it can inspect this repository but cannot edit files, run
-arbitrary commands, or write to git. All tools are restricted to the Microlearn
-repo root and skip heavy/generated folders and sensitive files.
+Read tools are always available. Write tools remain disabled unless explicitly
+enabled, and all repository/path/sensitive-file safeguards still apply.
 
 ### Tools
 
@@ -302,6 +300,38 @@ npm run server:start
 - `/mcp` requires the MCP bearer token.
 - Startup fails if auth is required but tokens are missing.
 
+### Optional Keycloak OAuth for MCP clients
+
+OAuth applies only to `/mcp`; the Expo app and `/api/*` continue using the
+existing static API bearer token. Configure all three values together:
+
+```bash
+MICROLEARN_OAUTH_ISSUER=https://auth.example.com/realms/microlearn
+MICROLEARN_OAUTH_AUDIENCE=https://api.example.com/mcp
+MICROLEARN_OAUTH_RESOURCE_URL=https://api.example.com/mcp
+```
+
+The MCP endpoint then accepts either the existing static MCP bearer token or a
+Keycloak JWT access token signed with `RS256`. JWT validation uses Keycloak's
+cached remote JWKS and checks signature, issuer, audience, expiration, and
+not-before claims. Supported scopes are:
+
+- `microlearn:read` for read tools
+- `microlearn:write` for non-destructive mutations
+- `microlearn:write microlearn:destructive` for high-risk operations
+
+High-risk operations still require every existing write/push feature flag and
+exact confirmation phrase. The static MCP token retains all three scopes.
+
+OAuth clients discover the resource server at:
+
+```text
+/.well-known/oauth-protected-resource/mcp
+```
+
+Authentication failures return a Bearer `WWW-Authenticate` challenge pointing
+to that metadata URL; verification details and raw tokens are never returned.
+
 ### Backups
 
 Write tools can export backups under `server/backups/` (gitignored):
@@ -429,4 +459,5 @@ See [`.env.example`](./.env.example). No secrets are required.
 - `MICROLEARN_REPO_ROOT` — optional absolute repo root for the MCP tools.
   Defaults to `process.cwd()` (run the server from the repo root).
 - `MICROLEARN_ENABLE_WRITE_TOOLS` / `MICROLEARN_ENABLE_GIT_PUSH` — see above.
-- `MICROLEARN_REQUIRE_AUTH` / `MICROLEARN_MCP_BEARER_TOKEN` / `MICROLEARN_API_BEARER_TOKEN` — optional local auth (Phase 7).
+- `MICROLEARN_REQUIRE_AUTH` / `MICROLEARN_MCP_BEARER_TOKEN` / `MICROLEARN_API_BEARER_TOKEN` — optional static auth (the mobile API path remains unchanged).
+- `MICROLEARN_OAUTH_ISSUER` / `MICROLEARN_OAUTH_AUDIENCE` / `MICROLEARN_OAUTH_RESOURCE_URL` — optional Keycloak OAuth for `/mcp`; all three are required as a group.

@@ -22,6 +22,8 @@ import { registerSourceTools } from './tools/sourceTools';
 import { registerRetrievalTools } from './tools/retrievalTools';
 import { registerGamificationTools } from './tools/gamificationTools';
 import { registerAdaptiveTools } from './tools/adaptiveTools';
+import { getMcpAuthContext, sendMcpInsufficientScope } from '../auth/mcpAuth';
+import { missingMcpScopes, requiredScopesForMcpRequest } from './scopePolicy';
 
 const MCP_SERVER_NAME = 'microlearn-local-mcp';
 const MCP_SERVER_VERSION = '0.1.0';
@@ -78,6 +80,15 @@ export function createMcpRouter(config: ServerConfig, db: Db): Router {
   });
 
   router.post('/mcp', async (req: Request, res: Response) => {
+    const requirement = requiredScopesForMcpRequest(req.body);
+    if (requirement) {
+      const missing = missingMcpScopes(getMcpAuthContext(res), requirement.requiredScopes);
+      if (missing.length > 0) {
+        sendMcpInsufficientScope(res, config, requirement.requiredScopes, requirement.id);
+        return;
+      }
+    }
+
     const server = buildMcpServer(ctx);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

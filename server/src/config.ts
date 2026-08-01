@@ -16,6 +16,9 @@ export interface ServerConfig {
   requireAuth: boolean;
   mcpBearerToken: string;
   apiBearerToken: string;
+  oauthIssuer: string;
+  oauthAudience: string;
+  oauthResourceUrl: string;
 }
 
 const DEFAULT_PORT = 3000;
@@ -49,12 +52,58 @@ function parseBool(raw: string | undefined): boolean {
   return raw?.trim().toLowerCase() === 'true';
 }
 
+function normalizeUrl(raw: string, variableName: string, requireHttps: boolean): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${variableName} must be a valid URL.`);
+  }
+  if (requireHttps && parsed.protocol !== 'https:') {
+    throw new Error(`${variableName} must use HTTPS in production.`);
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error(`${variableName} must not include credentials, a query string, or a fragment.`);
+  }
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+  return parsed.toString().replace(/\/$/, '');
+}
+
+function normalizeAudience(raw: string): string {
+  return raw.replace(/\/+$/, '');
+}
+
+export function isOAuthConfigured(config: ServerConfig): boolean {
+  return Boolean(config.oauthIssuer && config.oauthAudience && config.oauthResourceUrl);
+}
+
 /** Loads server configuration from environment variables with safe defaults. */
 export function loadConfig(): ServerConfig {
+  const nodeEnv = parseNodeEnv(process.env.NODE_ENV);
   const dbPathRaw = process.env.MICROLEARN_DB_PATH?.trim() || DEFAULT_DB_PATH;
   const requireAuth = parseBool(process.env.MICROLEARN_REQUIRE_AUTH);
   const mcpBearerToken = process.env.MICROLEARN_MCP_BEARER_TOKEN?.trim() ?? '';
   const apiBearerToken = process.env.MICROLEARN_API_BEARER_TOKEN?.trim() ?? '';
+  const oauthValues = {
+    issuer: process.env.MICROLEARN_OAUTH_ISSUER?.trim() ?? '',
+    audience: process.env.MICROLEARN_OAUTH_AUDIENCE?.trim() ?? '',
+    resourceUrl: process.env.MICROLEARN_OAUTH_RESOURCE_URL?.trim() ?? '',
+  };
+
+  const configuredOauthValues = Object.values(oauthValues).filter(Boolean).length;
+  if (configuredOauthValues > 0 && configuredOauthValues < 3) {
+    throw new Error(
+      'MICROLEARN_OAUTH_ISSUER, MICROLEARN_OAUTH_AUDIENCE, and MICROLEARN_OAUTH_RESOURCE_URL must be configured together.',
+    );
+  }
+
+  const oauthIssuer = oauthValues.issuer
+    ? normalizeUrl(oauthValues.issuer, 'MICROLEARN_OAUTH_ISSUER', nodeEnv === 'production')
+    : '';
+  const oauthResourceUrl = oauthValues.resourceUrl
+    ? normalizeUrl(oauthValues.resourceUrl, 'MICROLEARN_OAUTH_RESOURCE_URL', nodeEnv === 'production')
+    : '';
+  const oauthAudience = oauthValues.audience ? normalizeAudience(oauthValues.audience) : '';
 
   if (requireAuth) {
     if (!mcpBearerToken) {
@@ -70,7 +119,7 @@ export function loadConfig(): ServerConfig {
   }
 
   return {
-    nodeEnv: parseNodeEnv(process.env.NODE_ENV),
+    nodeEnv,
     port: parsePort(process.env.MICROLEARN_SERVER_PORT),
     dbPath: path.resolve(process.cwd(), dbPathRaw),
     serviceName: SERVICE_NAME,
@@ -80,5 +129,8 @@ export function loadConfig(): ServerConfig {
     requireAuth,
     mcpBearerToken,
     apiBearerToken,
+    oauthIssuer,
+    oauthAudience,
+    oauthResourceUrl,
   };
 }
