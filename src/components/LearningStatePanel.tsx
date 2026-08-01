@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GlassCard, SectionHeader } from '@/components/ui';
 import {
@@ -52,24 +52,31 @@ function ConceptRow({
 }
 
 /** Adaptive learning state: mastery stats, weak concepts, due reviews, next action. */
-export function LearningStatePanel() {
+export function LearningStatePanel({ refreshToken = 0 }: { refreshToken?: number }) {
   const serverEnabled = isServerConfigured();
   const [snapshot, setSnapshot] = useState<ServerLearningSnapshot | null>(null);
   const [loading, setLoading] = useState(serverEnabled);
+  const requestRef = useRef<Promise<void> | null>(null);
 
-  const load = useCallback(async () => {
-    if (!serverEnabled) return;
+  const load = useCallback((): Promise<void> => {
+    if (!serverEnabled) return Promise.resolve();
+    if (requestRef.current) return requestRef.current;
     setLoading(true);
-    try {
-      setSnapshot(await fetchLearningState());
-    } finally {
-      setLoading(false);
-    }
+    const request = fetchLearningState()
+      .then(setSnapshot)
+      .finally(() => {
+        if (requestRef.current === request) {
+          requestRef.current = null;
+          setLoading(false);
+        }
+      });
+    requestRef.current = request;
+    return request;
   }, [serverEnabled]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshToken]);
 
   if (!serverEnabled) return null;
 

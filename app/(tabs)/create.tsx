@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -43,6 +43,7 @@ import {
   uploadDocumentSource,
 } from '@/services/microlearnServer';
 import { colors, font, gradients, radius, shadow, spacing } from '@/theme/theme';
+import { useScreenRefresh } from '@/hooks/useScreenRefresh';
 
 type CreateTab = 'lesson' | 'roadmap';
 
@@ -266,7 +267,15 @@ function MasterySelector({
 
 export default function CreateScreen() {
   const router = useRouter();
-  const { hasKey, hydrated, config, generate, generatedLessons, deleteLesson } = useLibrary();
+  const {
+    hasKey,
+    hydrated,
+    config,
+    generate,
+    generatedLessons,
+    deleteLesson,
+    refreshFromBackend,
+  } = useLibrary();
   const { level } = usePreferences();
   const { subjectProgress } = useProgress();
   const {
@@ -275,7 +284,13 @@ export default function CreateScreen() {
     generateRoadmapFlow,
     deleteRoadmap,
     hydrated: roadmapsHydrated,
+    refreshRoadmaps,
   } = useRoadmaps();
+
+  const refreshCreateData = useCallback(async () => {
+    await Promise.all([refreshFromBackend(), refreshRoadmaps()]);
+  }, [refreshFromBackend, refreshRoadmaps]);
+  const { refreshing, refresh } = useScreenRefresh(refreshCreateData);
 
   const [tab, setTab] = useState<CreateTab>('lesson');
 
@@ -701,7 +716,12 @@ export default function CreateScreen() {
   const recentLessons = generatedLessons.slice(0, 3);
 
   return (
-    <AppScreen scroll contentStyle={styles.content} scrollProps={{ keyboardShouldPersistTaps: 'handled' }}>
+    <AppScreen
+      scroll
+      contentStyle={styles.content}
+      scrollProps={{ keyboardShouldPersistTaps: 'handled' }}
+      refresh={{ refreshing, onRefresh: refresh, accent: colors.create }}
+    >
       <View style={styles.pageHeader}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.pageTitle}>Create</Text>

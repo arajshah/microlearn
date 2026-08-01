@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MonthlyReviewCalendar } from '@/components/retrieval/MonthlyReviewCalendar';
 import { ActionCard, AppScreen, EmptyState, GlassCard, PrimaryButton, SectionHeader } from '@/components/ui';
@@ -26,6 +26,7 @@ import {
 } from '@/storage/retrievalTombstones';
 import { dayKey } from '@/utils/date';
 import { colors, font, radius, spacing } from '@/theme/theme';
+import { useScreenRefresh } from '@/hooks/useScreenRefresh';
 
 function formatDue(value: string): string {
   const d = new Date(value);
@@ -91,9 +92,7 @@ export default function RetrieveScreen() {
     }
   }, [serverEnabled]);
 
-  useEffect(() => {
-    loadRetrieval();
-  }, [loadRetrieval]);
+  const { refreshing, refresh } = useScreenRefresh(loadRetrieval);
 
   const todayKey = dayKey(new Date());
   const scheduleByDay = useMemo(() => {
@@ -201,7 +200,11 @@ export default function RetrieveScreen() {
         : 'No reviews yet. Add a completed lesson to review.';
 
   return (
-    <AppScreen scroll contentStyle={styles.content}>
+    <AppScreen
+      scroll
+      contentStyle={styles.content}
+      refresh={{ refreshing, onRefresh: refresh, accent: colors.retrieve }}
+    >
       <View style={styles.header}>
         <Text style={styles.title}>Retrieve</Text>
         <Text style={styles.subtitle}>Review what is scheduled.</Text>

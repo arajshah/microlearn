@@ -18,13 +18,13 @@ const PRESETS: { label: string; hour: number; minute: number }[] = [
   { label: 'Night', hour: 21, minute: 0 },
 ];
 
-export function ReminderSettings() {
+export function ReminderSettings({ refreshToken = 0 }: { refreshToken?: number }) {
   const [prefs, setPrefs] = useState<ReminderPrefs>(DEFAULT_PREFS);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     loadReminderPrefs().then(setPrefs);
-  }, []);
+  }, [refreshToken]);
 
   const toggle = async (value: boolean) => {
     setBusy(true);

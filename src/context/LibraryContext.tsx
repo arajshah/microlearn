@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { AppState } from 'react-native';
@@ -94,6 +95,8 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const [deletedLessonIds, setDeletedLessonIds] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [syncPending, setSyncPending] = useState(false);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const appStateRef = useRef(AppState.currentState);
 
   const applyLessons = useCallback(async (lessons: GeneratedLesson[], deletedIds: string[]) => {
     const normalized = normalizeGeneratedLessons(lessons);
@@ -102,7 +105,7 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     await persistLessonsCache(normalized, deletedIds);
   }, []);
 
-  const refreshFromBackend = useCallback(async () => {
+  const performBackendRefresh = useCallback(async () => {
     const pending = await readPendingMutations();
     const cached = await loadLessonsFromCache(pending);
     const merged = await refreshLessonsFromBackend(cached.lessons, cached.deletedIds);
@@ -116,6 +119,15 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       await applyLessons(finalLessons, refreshed.deletedIds);
     }
   }, [applyLessons]);
+
+  const refreshFromBackend = useCallback((): Promise<void> => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const request = performBackendRefresh().finally(() => {
+      if (refreshInFlight.current === request) refreshInFlight.current = null;
+    });
+    refreshInFlight.current = request;
+    return request;
+  }, [performBackendRefresh]);
 
   useEffect(() => {
     (async () => {
@@ -145,7 +157,9 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refreshFromBackend();
+      const wasBackgrounded = appStateRef.current === 'background' || appStateRef.current === 'inactive';
+      appStateRef.current = state;
+      if (wasBackgrounded && state === 'active') void refreshFromBackend().catch(() => {});
     });
     return () => sub.remove();
   }, [refreshFromBackend]);

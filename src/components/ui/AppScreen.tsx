@@ -1,13 +1,8 @@
 import React from 'react';
-import {
-  ScrollView,
-  ScrollViewProps,
-  StyleSheet,
-  View,
-  ViewProps,
-} from 'react-native';
+import { ScrollViewProps, StyleSheet, View, ViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing } from '@/theme/theme';
+import { AppRefreshConfig, AppRefreshScrollView } from './AppRefreshScrollView';
 
 type AppScreenProps = {
   children: React.ReactNode;
@@ -22,6 +17,7 @@ type AppScreenProps = {
 type AppScrollScreenProps = AppScreenProps & {
   scroll: true;
   scrollProps?: Omit<ScrollViewProps, 'style' | 'contentContainerStyle'>;
+  refresh?: AppRefreshConfig;
 };
 
 export function AppScreen(props: AppScreenProps | AppScrollScreenProps) {
@@ -42,7 +38,7 @@ export function AppScreen(props: AppScreenProps | AppScrollScreenProps) {
   if (scroll) {
     const scrollProps = 'scrollProps' in props ? props.scrollProps : undefined;
     return (
-      <ScrollView
+      <AppRefreshScrollView
         style={[styles.screen, style]}
         contentContainerStyle={[
           styles.scrollContent,
@@ -54,10 +50,11 @@ export function AppScreen(props: AppScreenProps | AppScrollScreenProps) {
           contentStyle,
         ]}
         showsVerticalScrollIndicator={false}
+        refresh={'refresh' in props ? props.refresh : undefined}
         {...scrollProps}
       >
         {children}
-      </ScrollView>
+      </AppRefreshScrollView>
     );
   }
 

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,12 +10,14 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppRefreshScrollView } from '@/components/ui';
 import { useLibrary } from '@/context/LibraryContext';
 import { useProgress } from '@/context/ProgressContext';
 import { useRoadmaps } from '@/context/RoadmapContext';
 import { getSubject, subjects } from '@/data/subjects';
 import { GeneratedLesson, Lesson, SubjectId } from '@/types/content';
 import { colors, font, radius, spacing } from '@/theme/theme';
+import { useScreenRefresh } from '@/hooks/useScreenRefresh';
 
 interface Entry {
   id: string;
@@ -80,12 +82,17 @@ function lessonEntry(lesson: GeneratedLesson): Entry {
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { generatedLessons } = useLibrary();
-  const { roadmaps } = useRoadmaps();
+  const { generatedLessons, refreshFromBackend } = useLibrary();
+  const { roadmaps, refreshRoadmaps } = useRoadmaps();
   const { isLessonComplete } = useProgress();
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<SubjectId | 'all' | 'roadmaps'>('all');
+
+  const refreshSearchData = useCallback(async () => {
+    await Promise.all([refreshFromBackend(), refreshRoadmaps()]);
+  }, [refreshFromBackend, refreshRoadmaps]);
+  const { refreshing, refresh } = useScreenRefresh(refreshSearchData);
 
   const entries = useMemo<Entry[]>(() => {
     const out: Entry[] = generatedLessons.map(lessonEntry);
@@ -163,11 +170,17 @@ export default function SearchScreen() {
         )}
       </ScrollView>
 
-      <ScrollView
+      <AppRefreshScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        refresh={{
+          refreshing,
+          onRefresh: refresh,
+          accent: colors.primary,
+          indicatorTopOffset: spacing.sm,
+        }}
       >
         <Text style={styles.resultMeta}>
           {results.length} result{results.length === 1 ? '' : 's'}
@@ -218,7 +231,7 @@ export default function SearchScreen() {
             </Text>
           </View>
         ) : null}
-      </ScrollView>
+      </AppRefreshScrollView>
     </View>
   );
 }

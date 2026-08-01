@@ -108,6 +108,9 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const deletedRoadmapIdsRef = useRef<string[]>([]);
   const pregenInFlight = useRef<Set<string>>(new Set());
   const refreshInFlight = useRef<Promise<void> | null>(null);
+  const roadmapRefreshInFlight = useRef(
+    new Map<string, Promise<GeneratedRoadmap | undefined>>(),
+  );
   const appStateRef = useRef(AppState.currentState);
 
   useEffect(() => {
@@ -205,18 +208,29 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   );
 
   const refreshRoadmapById = useCallback(
-    async (id: string): Promise<GeneratedRoadmap | undefined> => {
-      const local = roadmapsRef.current.find((r) => r.id === id);
-      if (!isServerConfigured()) return local;
+    (id: string): Promise<GeneratedRoadmap | undefined> => {
+      const existing = roadmapRefreshInFlight.current.get(id);
+      if (existing) return existing;
 
-      const remote = await fetchServerRoadmap(id);
-      if (!remote) return local;
+      const request = (async () => {
+        const local = roadmapsRef.current.find((r) => r.id === id);
+        if (!isServerConfigured()) return local;
 
-      const fresh = normalizeRoadmapEntityIds(
-        local ? mergeRoadmapPreservingLocalProgress(local, remote) : remote,
-      );
-      await persist(fresh);
-      return fresh;
+        const remote = await fetchServerRoadmap(id);
+        if (!remote) return local;
+
+        const fresh = normalizeRoadmapEntityIds(
+          local ? mergeRoadmapPreservingLocalProgress(local, remote) : remote,
+        );
+        await persist(fresh);
+        return fresh;
+      })().finally(() => {
+        if (roadmapRefreshInFlight.current.get(id) === request) {
+          roadmapRefreshInFlight.current.delete(id);
+        }
+      });
+      roadmapRefreshInFlight.current.set(id, request);
+      return request;
     },
     [persist],
   );

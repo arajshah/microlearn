@@ -1,25 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AchievementBadgeCard } from '@/components/gamification/AchievementBadgeCard';
 import { LearningStatePanel } from '@/components/LearningStatePanel';
 import { ProgressBar } from '@/components/ProgressBar';
 import { ReminderSettings } from '@/components/ReminderSettings';
-import { GlassCard, SectionHeader } from '@/components/ui';
+import { AppScreen, GlassCard, SectionHeader } from '@/components/ui';
 import { useBookmarks } from '@/context/BookmarksContext';
 import { useChallenge } from '@/context/ChallengeContext';
 import { useProgress } from '@/context/ProgressContext';
 import { deriveAchievements } from '@/data/achievements';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { useScreenRefresh } from '@/hooks/useScreenRefresh';
 import { subjects } from '@/data/courses';
 import {
   getAchievements,
@@ -33,7 +32,6 @@ import { colors, font, radius, spacing } from '@/theme/theme';
 const XP_PER_LEVEL = 150;
 
 export default function ProfileScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const reduceMotion = useReducedMotion();
   const { count: savedCount } = useBookmarks();
@@ -53,28 +51,26 @@ export default function ProfileScreen() {
   const [serverSummary, setServerSummary] = useState<ServerProfileSummary | null>(null);
   const [serverAchievements, setServerAchievements] = useState<ServerAchievement[]>([]);
   const [serverLoading, setServerLoading] = useState(serverEnabled);
+  const [panelRefreshToken, setPanelRefreshToken] = useState(0);
 
-  useEffect(() => {
-    if (!serverEnabled) return;
-    let cancelled = false;
-    (async () => {
+  const refreshProfile = useCallback(async () => {
+    setPanelRefreshToken((value) => value + 1);
+    if (serverEnabled) {
+      setServerLoading(true);
       try {
         const [summary, achievements] = await Promise.all([
           getProfileSummary(),
           getAchievements(),
         ]);
-        if (!cancelled) {
-          setServerSummary(summary);
-          setServerAchievements(achievements);
-        }
+        setServerSummary(summary);
+        setServerAchievements(achievements);
       } finally {
-        if (!cancelled) setServerLoading(false);
+        setServerLoading(false);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    }
   }, [serverEnabled]);
+
+  const { refreshing, refresh } = useScreenRefresh(refreshProfile);
 
   const displayXp = serverSummary?.xp ?? totalXp;
   const displayStreak = serverSummary?.streaks.study.current ?? streak;
@@ -120,13 +116,10 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxxl },
-      ]}
-      showsVerticalScrollIndicator={false}
+    <AppScreen
+      scroll
+      contentStyle={styles.content}
+      refresh={{ refreshing, onRefresh: refresh, accent: colors.primary }}
     >
       <View style={styles.headerRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
@@ -205,7 +198,7 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.section}>
-        <LearningStatePanel />
+        <LearningStatePanel refreshToken={panelRefreshToken} />
       </View>
 
       <View style={styles.section}>
@@ -238,7 +231,7 @@ export default function ProfileScreen() {
       </Pressable>
 
       <Text style={styles.sectionTitle}>Reminders</Text>
-      <ReminderSettings />
+      <ReminderSettings refreshToken={panelRefreshToken} />
 
       <Text style={styles.sectionTitle}>Subjects</Text>
       <View style={styles.card}>
@@ -276,7 +269,7 @@ export default function ProfileScreen() {
       <Text style={styles.footerNote}>
         Microlearn · Bite-sized lessons in Economics, Philosophy, Literature & CS
       </Text>
-    </ScrollView>
+    </AppScreen>
   );
 }
 
@@ -290,8 +283,7 @@ function StatLine({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.xl },
+  content: { gap: spacing.xl },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   pageTitle: {
     color: colors.text,

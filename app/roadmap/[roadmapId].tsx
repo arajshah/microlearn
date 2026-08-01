@@ -1,11 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -14,12 +13,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RoadmapHeader } from '@/components/roadmap/RoadmapHeader';
 import { RoadmapLessonPreview } from '@/components/roadmap/RoadmapLessonPreview';
 import { RoadmapUnitSection } from '@/components/roadmap/RoadmapUnitSection';
+import { AppRefreshScrollView } from '@/components/ui';
 import { useRoadmaps } from '@/context/RoadmapContext';
 import { useProgress } from '@/context/ProgressContext';
 import { isServerConfigured, listDiagnosticSessions } from '@/services/microlearnServer';
 import { GeneratedRoadmap, RoadmapLessonNode } from '@/types/roadmap';
 import { allRoadmapLessons, continueNode, roadmapStats, markNodeCompleted } from '@/utils/roadmapProgress';
 import { colors, font, radius, spacing } from '@/theme/theme';
+import { useScreenRefresh } from '@/hooks/useScreenRefresh';
 
 function findFirstUsableNode(roadmap: GeneratedRoadmap): RoadmapLessonNode | undefined {
   const flat = allRoadmapLessons(roadmap);
@@ -47,15 +48,12 @@ export default function RoadmapScreen() {
   const { isLessonComplete } = useProgress();
 
   const [freshRoadmap, setFreshRoadmap] = useState<GeneratedRoadmap | undefined>(undefined);
-  const [refreshingRoadmap, setRefreshingRoadmap] = useState(false);
   const [previewNode, setPreviewNode] = useState<RoadmapLessonNode | null>(null);
   const [starting, setStarting] = useState(false);
   const [continueLoading, setContinueLoading] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [diagnosticDismissed, setDiagnosticDismissed] = useState(false);
   const [diagnosticDone, setDiagnosticDone] = useState<boolean | null>(null);
-  const openRoadmapRef = useRef(openRoadmap);
-  const refreshRoadmapByIdRef = useRef(refreshRoadmapById);
 
   const localRoadmap = roadmapId ? getRoadmapById(roadmapId) : undefined;
   const roadmap = localRoadmap ?? freshRoadmap;
@@ -66,30 +64,10 @@ export default function RoadmapScreen() {
   }, [localRoadmap]);
 
   useEffect(() => {
-    openRoadmapRef.current = openRoadmap;
-    refreshRoadmapByIdRef.current = refreshRoadmapById;
-  }, [openRoadmap, refreshRoadmapById]);
-
-  useEffect(() => {
     if (!roadmapId) return;
-    let cancelled = false;
-
     setFreshRoadmap(undefined);
-    void openRoadmapRef.current(roadmapId);
-
-    setRefreshingRoadmap(true);
-    refreshRoadmapByIdRef.current(roadmapId)
-      .then((fresh) => {
-        if (!cancelled && fresh) setFreshRoadmap(fresh);
-      })
-      .finally(() => {
-        if (!cancelled) setRefreshingRoadmap(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [roadmapId]);
+    void openRoadmap(roadmapId);
+  }, [openRoadmap, roadmapId]);
 
   useEffect(() => {
     if (!roadmap) return;
@@ -99,20 +77,22 @@ export default function RoadmapScreen() {
     if (finished) void onRoadmapLessonCompleted(roadmap.id, finished.id);
   }, [roadmap, isLessonComplete, onRoadmapLessonCompleted]);
 
-  // Offer a diagnostic only when the server is reachable and none has completed yet.
-  useEffect(() => {
+  const refreshRoadmapScreen = useCallback(async () => {
     if (!roadmapId || !isServerConfigured()) {
       setDiagnosticDone(true);
       return;
     }
-    let cancelled = false;
-    void listDiagnosticSessions({ roadmapId, status: 'completed', limit: 1 }).then((sessions) => {
-      if (!cancelled) setDiagnosticDone(sessions.length > 0);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [roadmapId]);
+    const [fresh, sessions] = await Promise.all([
+      refreshRoadmapById(roadmapId),
+      listDiagnosticSessions({ roadmapId, status: 'completed', limit: 1 }),
+    ]);
+    if (fresh) setFreshRoadmap(fresh);
+    setDiagnosticDone(sessions.length > 0);
+  }, [refreshRoadmapById, roadmapId]);
+
+  const { refreshing: refreshingRoadmap, refresh } = useScreenRefresh(refreshRoadmapScreen, {
+    enabled: Boolean(roadmapId),
+  });
 
   const handleContinue = useCallback(async () => {
     if (!roadmapId || continueLoading) return;
@@ -235,9 +215,15 @@ export default function RoadmapScreen() {
         <View style={{ width: 32 }} />
       </View>
 
-      <ScrollView
+      <AppRefreshScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xxxl }]}
         showsVerticalScrollIndicator={false}
+        refresh={{
+          refreshing: refreshingRoadmap,
+          onRefresh: refresh,
+          accent: colors.paths,
+          indicatorTopOffset: spacing.sm,
+        }}
       >
         <RoadmapHeader
           roadmap={roadmap}
@@ -299,7 +285,7 @@ export default function RoadmapScreen() {
             />
           ))}
         </View>
-      </ScrollView>
+      </AppRefreshScrollView>
 
       <RoadmapLessonPreview
         visible={previewNode !== null}

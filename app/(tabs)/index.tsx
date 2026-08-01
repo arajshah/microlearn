@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MonthlyStreakCalendar } from '@/components/gamification/MonthlyStreakCalendar';
 import { ProgressBar } from '@/components/ProgressBar';
@@ -22,6 +22,7 @@ import { countDueReviewGroups } from '@/retrieval/reviewGroups';
 import { getSubject } from '@/data/subjects';
 import { colors, font, gradients, radius, shadow, spacing } from '@/theme/theme';
 import { dayKey, greeting } from '@/utils/date';
+import { useScreenRefresh } from '@/hooks/useScreenRefresh';
 import { continueNode, roadmapStats } from '@/utils/roadmapProgress';
 import {
   getDailyActivity,
@@ -106,8 +107,8 @@ export default function TodayScreen() {
   } = useProgress();
   const { isDoneToday: challengeDone } = useChallenge();
   const { onboarded, hydrated: prefsHydrated } = usePreferences();
-  const { hydrated: roadmapsHydrated, lastOpenedRoadmap } = useRoadmaps();
-  const { generatedLessons } = useLibrary();
+  const { hydrated: roadmapsHydrated, lastOpenedRoadmap, refreshRoadmaps } = useRoadmaps();
+  const { generatedLessons, refreshFromBackend } = useLibrary();
 
   const serverEnabled = isServerConfigured();
   const [serverSummary, setServerSummary] = useState<ServerProfileSummary | null>(null);
@@ -116,28 +117,26 @@ export default function TodayScreen() {
 
   const monthDate = useMemo(() => new Date(), []);
 
-  useEffect(() => {
-    if (!serverEnabled) return;
-    let cancelled = false;
-    (async () => {
-      const [summary, deletedReviewSets, deletedItems, dueItems, activity] = await Promise.all([
-        getProfileSummary(),
-        readDeletedReviewSetIds(),
-        readDeletedRetrievalItemIds(),
-        getDueRetrievalItems({ limit: 200 }),
-        getDailyActivity(35),
-      ]);
-      if (!cancelled) {
+  const refreshToday = useCallback(async () => {
+    const refreshServerData = async () => {
+      if (serverEnabled) {
+        const [summary, deletedReviewSets, deletedItems, dueItems, activity] = await Promise.all([
+          getProfileSummary(),
+          readDeletedReviewSetIds(),
+          readDeletedRetrievalItemIds(),
+          getDueRetrievalItems({ limit: 200 }),
+          getDailyActivity(35),
+        ]);
         setServerSummary(summary);
         const filtered = filterRetrievalItems(dueItems, deletedReviewSets, deletedItems);
         setDueGroupCount(countDueReviewGroups(filtered));
         setServerActivity(activity);
       }
-    })();
-    return () => {
-      cancelled = true;
     };
-  }, [serverEnabled]);
+    await Promise.all([refreshRoadmaps(), refreshFromBackend(), refreshServerData()]);
+  }, [refreshFromBackend, refreshRoadmaps, serverEnabled]);
+
+  const { refreshing, refresh } = useScreenRefresh(refreshToday);
 
   useEffect(() => {
     if (prefsHydrated && !onboarded) router.replace('/onboarding');
@@ -216,7 +215,11 @@ export default function TodayScreen() {
   );
 
   return (
-    <AppScreen scroll contentStyle={styles.content}>
+    <AppScreen
+      scroll
+      contentStyle={styles.content}
+      refresh={{ refreshing, onRefresh: refresh, accent: colors.today }}
+    >
       {/* Header */}
       <View style={styles.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
