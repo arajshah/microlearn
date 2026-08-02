@@ -30,6 +30,7 @@
     "server:tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.1.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -58,6 +59,7 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-svg": "^15.12.1",
+    "react-native-web": "^0.21.0",
     "react-native-worklets": "^0.5.1",
     "zod": "^4.4.3"
   },
