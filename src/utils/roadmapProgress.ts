@@ -34,8 +34,12 @@ export function findRoadmapUnit(
 
 export function roadmapStats(roadmap: GeneratedRoadmap) {
   const lessons = allRoadmapLessons(roadmap);
-  const completed = lessons.filter((l) => l.status === 'completed').length;
-  const total = lessons.length;
+  const localCompleted = lessons.filter((l) => l.status === 'completed').length;
+  const total = roadmap.serverSummary?.lessonCount ?? lessons.length;
+  const completed = Math.min(
+    total,
+    Math.max(localCompleted, roadmap.serverSummary?.completedLessonCount ?? 0),
+  );
   const remainingMinutes = lessons
     .filter((l) => l.status !== 'completed')
     .reduce((sum, l) => sum + l.estimatedMinutes, 0);

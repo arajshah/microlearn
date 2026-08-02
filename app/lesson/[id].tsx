@@ -73,6 +73,7 @@ export default function LessonPlayer() {
     'idle' | 'scheduling' | 'scheduled' | 'error' | 'unavailable'
   >('idle');
   const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
+  const scheduleRequestInFlight = useRef(false);
 
   const fade = useRef(new Animated.Value(1)).current;
   const generatedLesson = useMemo(() => getGenerated(id ?? ''), [id, getGenerated]);
@@ -221,7 +222,7 @@ export default function LessonPlayer() {
       await onRoadmapLessonCompleted(rmId, nId);
     }
     if (telemetry) {
-      trackLessonCompleted(telemetry, {
+      await trackLessonCompleted(telemetry, {
         correctCount,
         totalCount: totalQuestions,
         accuracy: totalQuestions > 0 ? Number((correctCount / totalQuestions).toFixed(4)) : 0,
@@ -263,29 +264,42 @@ export default function LessonPlayer() {
   const isRoadmapGeneratedLesson = Boolean(completionRoadmapId && completionNodeId);
 
   const scheduleRetrieval = async () => {
-    if (!generatedLesson || scheduleStatus === 'scheduling') return;
+    if (!generatedLesson || scheduleRequestInFlight.current) return;
     if (!isServerConfigured()) {
       setScheduleStatus('unavailable');
       setScheduleMessage('Connect the local server to add this lesson to review.');
       return;
     }
+    scheduleRequestInFlight.current = true;
     setScheduleStatus('scheduling');
     setScheduleMessage(null);
-    const result = await createReviewSetFromLesson({
-      lessonId: generatedLesson.id,
-      roadmapId: completionRoadmapId ?? generatedLesson.roadmapId,
-      lessonNodeId: completionNodeId ?? generatedLesson.roadmapNodeId,
-      lesson: generatedLesson,
-    });
-    if (result.ok && (result.reviewSet || (result.items?.length ?? 0) > 0)) {
-      setScheduleStatus('scheduled');
-      setScheduleMessage(result.existing && result.existing > 0 ? 'Already in review' : 'Added to review');
-    } else if (result.ok && result.totalCandidates === 0) {
+    try {
+      const result = await createReviewSetFromLesson({
+        lessonId: generatedLesson.id,
+        roadmapId: completionRoadmapId ?? generatedLesson.roadmapId,
+        lessonNodeId: completionNodeId ?? generatedLesson.roadmapNodeId,
+        lesson: generatedLesson,
+      });
+      if (result.ok && (result.reviewSet || (result.items?.length ?? 0) > 0)) {
+        setScheduleStatus('scheduled');
+        if ((result.created ?? 0) > 0) {
+          const count = result.created ?? 0;
+          setScheduleMessage(`Added ${count} review prompt${count === 1 ? '' : 's'}.`);
+        } else {
+          setScheduleMessage('Already in review.');
+        }
+      } else if (result.ok && result.totalCandidates === 0) {
+        setScheduleStatus('error');
+        setScheduleMessage('No review prompts could be created from this lesson.');
+      } else {
+        setScheduleStatus('error');
+        setScheduleMessage(result.errorMessage ?? 'Could not add to review. Try again.');
+      }
+    } catch {
       setScheduleStatus('error');
-      setScheduleMessage('No review prompts could be created from this lesson.');
-    } else {
-      setScheduleStatus('error');
-      setScheduleMessage(result.errorMessage ?? 'Could not add to review. Try again.');
+      setScheduleMessage('Could not add to review. Try again.');
+    } finally {
+      scheduleRequestInFlight.current = false;
     }
   };
 

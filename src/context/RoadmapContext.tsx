@@ -9,25 +9,17 @@ import React, {
   useState,
 } from 'react';
 import { AppState } from 'react-native';
-import { AiError } from '@/ai/client';
-import { generateRoadmap } from '@/ai/roadmap';
-import {
-  draftToGeneratedLesson,
-  ensureLessonBlueprint,
-  generateRoadmapLesson,
-  persistRoadmapLessonArtifacts,
-} from '@/ai/roadmapLesson';
-import { getLessonBlueprint } from '@/storage/lessonBlueprintStorage';
-import { getGeneratedLessonVersion } from '@/storage/lessonVersionStorage';
-import { LESSON_PROMPT_VERSION } from '@/types/lessonBlueprint';
-import { buildLessonGenerationContext } from '@/utils/lessonContinuity';
 import { useLibrary } from '@/context/LibraryContext';
 import {
-  createServerRoadmap,
   deleteServerRoadmap,
   fetchServerRoadmap,
+  generateServerRoadmap,
+  generateServerRoadmapNodeLesson,
+  getServerLesson,
   isServerConfigured,
   postServerOutcome,
+  pregenerateServerRoadmapLessons,
+  ServerGenerationError,
 } from '@/services/microlearnServer';
 import {
   loadRoadmapsFromCache,
@@ -95,7 +87,7 @@ async function setLastOpenedRoadmapId(id: string): Promise<void> {
 }
 
 export function RoadmapProvider({ children }: { children: React.ReactNode }) {
-  const { config, saveGeneratedLesson, hasKey } = useLibrary();
+  const { saveGeneratedLesson } = useLibrary();
   const [roadmaps, setRoadmaps] = useState<GeneratedRoadmap[]>([]);
   const [deletedRoadmapIds, setDeletedRoadmapIds] = useState<string[]>([]);
   const [lastOpenedRoadmapId, setLastOpenedRoadmapIdState] = useState<string | null>(null);
@@ -237,35 +229,49 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
 
   const generateRoadmapFlow = useCallback(
     async (input: GenerateRoadmapInput) => {
-      if (generatingRoadmap) throw new AiError('Already generating a roadmap.');
-      if (!hasKey) throw new AiError('Add your API key in Settings first.');
+      if (generatingRoadmap) throw new ServerGenerationError('Already generating a roadmap.');
+      if (!isServerConfigured()) {
+        throw new ServerGenerationError(
+          'Connect to the Microlearn server to generate a roadmap.',
+          { code: 'SERVER_NOT_CONFIGURED' },
+        );
+      }
       setGeneratingRoadmap(true);
       try {
-        let roadmap = normalizeRoadmapEntityIds(await generateRoadmap(config, input));
-        if (isServerConfigured()) {
-          const result = await createServerRoadmap(roadmap);
-          if (result.ok && result.data) {
-            roadmap = normalizeRoadmapEntityIds(result.data);
-          } else {
-            await enqueuePendingMutation('create_roadmap', roadmap);
-            setSyncPending(true);
-          }
-        } else {
-          await enqueuePendingMutation('create_roadmap', roadmap);
-          setSyncPending(true);
-        }
-        const next = [roadmap, ...roadmapsRef.current.filter((r) => r.id !== roadmap.id)];
+        const roadmap = await generateServerRoadmap({
+          topic: input.topic,
+          goal: input.goal,
+          masteryLevel: input.masteryLevel,
+          depth: input.depth,
+          lessonCount: input.lessonCount,
+          slidesPerLesson: input.slidesPerLesson,
+          preferences: input.preferences,
+          sourceUrl: input.sourceUrl,
+          sourceExtractionId: input.sourceExtractionId,
+          sourceContext: input.sourceContext,
+          idempotencyKey: `${input.topic}:${input.goal}:${Date.now()}`,
+        });
+        const normalized = normalizeRoadmapEntityIds({
+          ...roadmap,
+          targetLessonCount: input.lessonCount,
+          slidesPerLesson: input.slidesPerLesson,
+          preferences: input.preferences,
+          sourceUrl: input.sourceUrl,
+          sourceExtractionId: input.sourceExtractionId,
+          sourceContext: input.sourceContext,
+        });
+        const next = [normalized, ...roadmapsRef.current.filter((r) => r.id !== normalized.id)];
         roadmapsRef.current = next;
         setRoadmaps(next);
         await persistRoadmapsCache(next, deletedRoadmapIdsRef.current);
-        await setLastOpenedRoadmapId(roadmap.id);
-        setLastOpenedRoadmapIdState(roadmap.id);
-        return roadmap;
+        await setLastOpenedRoadmapId(normalized.id);
+        setLastOpenedRoadmapIdState(normalized.id);
+        return normalized;
       } finally {
         setGeneratingRoadmap(false);
       }
     },
-    [config, deletedRoadmapIds, generatingRoadmap, hasKey],
+    [generatingRoadmap],
   );
 
   const openRoadmap = useCallback(async (id: string) => {
@@ -313,218 +319,99 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
     setPregenActive(pregenInFlight.current.size > 0);
   }, []);
 
-  const isNodeReadyForPregen = useCallback((roadmap: GeneratedRoadmap, node: RoadmapLessonNode) => {
-    if (node.generatedLessonId || node.status === 'completed' || node.status === 'generating') {
-      return false;
-    }
-    if (node.status !== 'locked') return true;
-    const completed = new Set(
-      allRoadmapLessons(roadmap).filter((lesson) => lesson.status === 'completed').map((lesson) => lesson.id),
-    );
-    return node.prerequisiteIds.every((id) => completed.has(id));
-  }, []);
-
-  const upcomingPregenCandidates = useCallback(
-    (roadmap: GeneratedRoadmap, afterNodeId?: string, count = 2): RoadmapLessonNode[] => {
-      const recalculated = recalculateRoadmapStatuses(roadmap, { preserveGenerating: false });
-      const flat = allRoadmapLessons(recalculated);
-      const completed = new Set(
-        flat.filter((lesson) => lesson.status === 'completed').map((lesson) => lesson.id),
-      );
-      const startIdx = afterNodeId ? flat.findIndex((lesson) => lesson.id === afterNodeId) + 1 : 0;
-      const candidates: RoadmapLessonNode[] = [];
-      for (const node of flat.slice(Math.max(startIdx, 0))) {
-        const pathBlocked =
-          node.status === 'locked' && !node.prerequisiteIds.every((id) => completed.has(id));
-        if (pathBlocked) break;
-        if (node.status === 'completed') {
-          continue;
-        }
-        if (node.generatedLessonId || node.status === 'generating') {
-          continue;
-        }
-        if (!isNodeReadyForPregen(recalculated, node)) break;
-        candidates.push(node);
-        if (candidates.length >= Math.max(0, count)) break;
-      }
-      return candidates;
-    },
-    [isNodeReadyForPregen],
-  );
-
-  const generateMissingRoadmapLesson = useCallback(
-    async (roadmap: GeneratedRoadmap, nodeId: string): Promise<GeneratedRoadmap> => {
-      const workingRoadmap = recalculateRoadmapStatuses(normalizeRoadmapEntityIds(roadmap), {
-        preserveGenerating: false,
-      });
-      const node = findRoadmapNode(workingRoadmap, nodeId);
-      if (!node || !isNodeReadyForPregen(workingRoadmap, node)) return workingRoadmap;
-
-      const key = `${workingRoadmap.id}:${node.id}`;
-      if (pregenInFlight.current.has(key)) return workingRoadmap;
+  const pregenerateUpcomingLessons = useCallback(
+    async (roadmap: GeneratedRoadmap, afterNodeId?: string, count = 2) => {
+      if (!isServerConfigured()) return;
+      const key = `pregen:${roadmap.id}`;
+      if (pregenInFlight.current.has(key)) return;
       pregenInFlight.current.add(key);
       updatePregenActive();
-
-      const priorStatus = node.status === 'active' ? 'active' : 'available';
-      let nextRoadmap = setNodeStatus(workingRoadmap, node.id, 'generating');
-      await persist(nextRoadmap);
-
       try {
-        const ctx = await buildLessonGenerationContext(nextRoadmap, node.id);
-        if (!ctx) throw new AiError('Could not build lesson context.');
-
-        const draft = await generateRoadmapLesson(config, ctx, node, DEFAULT_SUBJECT);
-        const blueprint =
-          (await getLessonBlueprint(nextRoadmap.id, node.id)) ??
-          (await ensureLessonBlueprint(config, ctx, node.id, node));
-        const lesson = draftToGeneratedLesson(draft, {
-          subjectId: DEFAULT_SUBJECT,
-          topic: node.title,
-          roadmapId: nextRoadmap.id,
-          roadmapNodeId: node.id,
-          model: config.model,
+        const result = await pregenerateServerRoadmapLessons({
+          roadmapId: roadmap.id,
+          fromNodeId: afterNodeId,
+          count,
         });
-
-        await saveGeneratedLesson(lesson);
-        await persistRoadmapLessonArtifacts(lesson, blueprint);
-
-        nextRoadmap = setNodeStatus(nextRoadmap, node.id, priorStatus, {
-          generatedLessonId: lesson.id,
-          blueprintId: blueprint.id,
-          blueprintVersion: blueprint.version,
-        });
-        nextRoadmap = recalculateRoadmapStatuses(nextRoadmap);
-        await persist(nextRoadmap);
-        void syncRoadmapNodeToBackend(nextRoadmap, node.id).catch(() => {});
-        return nextRoadmap;
+        await persist(normalizeRoadmapEntityIds(result.roadmap));
+        for (const nodeId of [...result.generated, ...result.reused]) {
+          const node = findRoadmapNode(result.roadmap, nodeId);
+          if (!node?.generatedLessonId) continue;
+          const lesson = await getServerLesson(node.generatedLessonId);
+          if (lesson) await saveGeneratedLesson(lesson);
+        }
       } catch (err) {
-        console.warn('[roadmap-pregen] failed', workingRoadmap.id, node.id, err);
-        const reverted = setNodeStatus(workingRoadmap, node.id, node.status === 'active' ? 'active' : node.status);
-        await persist(reverted);
-        return reverted;
+        console.warn('[roadmap-pregen] server pregenerate failed', roadmap.id, err);
       } finally {
         pregenInFlight.current.delete(key);
         updatePregenActive();
       }
     },
-    [config, isNodeReadyForPregen, persist, saveGeneratedLesson, updatePregenActive],
-  );
-
-  const pregenerateUpcomingLessons = useCallback(
-    async (roadmap: GeneratedRoadmap, afterNodeId?: string, count = 2) => {
-      if (!hasKey) return;
-      let working = recalculateRoadmapStatuses(normalizeRoadmapEntityIds(roadmap), {
-        preserveGenerating: false,
-      });
-      const candidates = upcomingPregenCandidates(working, afterNodeId, count);
-      for (const candidate of candidates) {
-        const latest = roadmapsRef.current.find((r) => r.id === working.id);
-        if (latest) {
-          working = recalculateRoadmapStatuses(normalizeRoadmapEntityIds(latest), {
-            preserveGenerating: false,
-          });
-        }
-        const latestNode = findRoadmapNode(working, candidate.id);
-        if (!latestNode || !isNodeReadyForPregen(working, latestNode)) continue;
-        working = await generateMissingRoadmapLesson(working, latestNode.id);
-      }
-    },
-    [generateMissingRoadmapLesson, hasKey, isNodeReadyForPregen, upcomingPregenCandidates],
+    [persist, saveGeneratedLesson, updatePregenActive],
   );
 
   const pregenerateRoadmapLessons = useCallback(
     async (roadmapId: string, opts: { count?: number; fromNodeId?: string } = {}) => {
+      if (!isServerConfigured()) return;
       let roadmap = roadmapsRef.current.find((r) => r.id === roadmapId);
       if (!roadmap) return;
-      if (isServerConfigured()) {
-        const remote = await fetchServerRoadmap(roadmapId);
-        if (remote) {
-          roadmap = mergeRoadmapPreservingLocalProgress(roadmap, remote);
-          await persist(roadmap);
-        }
+      const remote = await fetchServerRoadmap(roadmapId);
+      if (remote) {
+        roadmap = mergeRoadmapPreservingLocalProgress(roadmap, remote);
+        await persist(roadmap);
       }
-      const recalculated = recalculateRoadmapStatuses(normalizeRoadmapEntityIds(roadmap), {
-        preserveGenerating: false,
-      });
-      await persist(recalculated);
-      await pregenerateUpcomingLessons(recalculated, opts.fromNodeId, opts.count ?? 3);
+      await pregenerateUpcomingLessons(roadmap, opts.fromNodeId, opts.count ?? 3);
     },
     [persist, pregenerateUpcomingLessons],
   );
 
   const startRoadmapLesson = useCallback(
     async (roadmapId: string, nodeId: string) => {
+      if (!isServerConfigured()) {
+        throw new ServerGenerationError(
+          'Connect to the Microlearn server to generate lessons.',
+          { code: 'SERVER_NOT_CONFIGURED' },
+        );
+      }
       let roadmap = getRoadmapById(roadmapId);
-      if (!roadmap) throw new AiError('Roadmap not found.');
+      if (!roadmap) throw new ServerGenerationError('Roadmap not found.');
       roadmap = normalizeRoadmapEntityIds(roadmap);
       const node = findRoadmapNode(roadmap, nodeId);
-      if (!node) throw new AiError('Lesson not found in roadmap.');
-      if (node.status === 'locked') throw new AiError('Complete prerequisites first.');
-      if (node.status === 'generating') throw new AiError('Lesson is still generating.');
+      if (!node) throw new ServerGenerationError('Lesson not found in roadmap.');
+      if (node.status === 'locked') throw new ServerGenerationError('Complete prerequisites first.');
+      if (node.status === 'generating') throw new ServerGenerationError('Lesson is still generating.');
 
       if (node.generatedLessonId) {
-        const version = await getGeneratedLessonVersion(roadmapId, node.id);
-        const stale = version
-          ? version.promptVersion !== LESSON_PROMPT_VERSION ||
-            (node.blueprintVersion != null && version.blueprintVersion !== node.blueprintVersion)
-          : false;
-        if (!stale) {
-          await openRoadmap(roadmapId);
-          void pregenerateUpcomingLessons(roadmap, node.id, 2);
-          return { lessonId: node.generatedLessonId };
-        }
+        await openRoadmap(roadmapId);
+        void pregenerateUpcomingLessons(roadmap, node.id, 2);
+        return { lessonId: node.generatedLessonId };
       }
 
       roadmap = setNodeStatus(roadmap, node.id, 'generating');
       await persist(roadmap);
 
       try {
-        const ctx = await buildLessonGenerationContext(roadmap, node.id);
-        if (!ctx) throw new AiError('Could not build lesson context.');
-
-        const draft = await generateRoadmapLesson(config, ctx, node, DEFAULT_SUBJECT);
-        const blueprint =
-          (await getLessonBlueprint(roadmap.id, node.id)) ??
-          (await ensureLessonBlueprint(config, ctx, node.id, node));
-        const lesson = draftToGeneratedLesson(draft, {
+        const result = await generateServerRoadmapNodeLesson({
+          roadmapId,
+          nodeId,
           subjectId: DEFAULT_SUBJECT,
-          topic: node.title,
-          roadmapId: roadmap.id,
-          roadmapNodeId: node.id,
-          model: config.model,
-          existingId: node.generatedLessonId,
         });
-
-        await saveGeneratedLesson(lesson);
-        await persistRoadmapLessonArtifacts(lesson, blueprint);
-
-        roadmap = setNodeStatus(roadmap, node.id, 'active', {
-          generatedLessonId: lesson.id,
-          blueprintId: blueprint.id,
-          blueprintVersion: blueprint.version,
-        });
-        roadmap = recalculateRoadmapStatuses(roadmap, { preserveGenerating: true });
-        await persist(roadmap);
-        void syncRoadmapNodeToBackend(roadmap, node.id).catch(() => {});
+        await saveGeneratedLesson(result.lesson);
+        const nextRoadmap = recalculateRoadmapStatuses(
+          normalizeRoadmapEntityIds(result.roadmap),
+          { preserveGenerating: true },
+        );
+        await persist(nextRoadmap);
         await openRoadmap(roadmapId);
-
-        void pregenerateUpcomingLessons(roadmap, node.id, 2);
-        return { lessonId: lesson.id };
+        void pregenerateUpcomingLessons(nextRoadmap, node.id, 2);
+        return { lessonId: result.lesson.id };
       } catch (e) {
-        console.error('[roadmap-lesson] failed', roadmapId, node.id, e);
+        console.error('[roadmap-lesson] failed', roadmapId, nodeId, e);
         roadmap = setNodeStatus(roadmap, node.id, 'error');
         await persist(roadmap);
         throw e;
       }
     },
-    [
-      config,
-      getRoadmapById,
-      openRoadmap,
-      persist,
-      pregenerateUpcomingLessons,
-      saveGeneratedLesson,
-    ],
+    [getRoadmapById, openRoadmap, persist, pregenerateUpcomingLessons, saveGeneratedLesson],
   );
 
   const onRoadmapLessonCompleted = useCallback(
@@ -545,6 +432,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       await persist(roadmap);
       await enqueuePendingMutation('update_roadmap', roadmap);
       setSyncPending(true);
+      if (outcome) await postServerOutcome(outcome).catch(() => false);
       const next = continueNode(roadmap);
       const syncResults = await Promise.allSettled([
         syncRoadmapNodeToBackend(roadmap, nodeId),
@@ -552,14 +440,25 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       ]);
       const nodeSyncFailed = syncResults.some((result) => result.status === 'rejected');
       if (nodeSyncFailed) setSyncPending(true);
-      runBackendSyncCycle()
-        .then((sync) => setSyncPending(sync.syncPending))
+      void runBackendSyncCycle()
+        .then(async (sync) => {
+          setSyncPending(sync.syncPending);
+          if (isServerConfigured()) {
+            await refreshRoadmapById(roadmapId);
+            await refreshRoadmaps();
+          }
+        })
         .catch(() => setSyncPending(true));
       void pregenerateUpcomingLessons(roadmap, nodeId, 2);
-      if (outcome) void postServerOutcome(outcome).catch(() => {});
       void recordActivityEventSafe();
     },
-    [getRoadmapById, persist, pregenerateUpcomingLessons],
+    [
+      getRoadmapById,
+      persist,
+      pregenerateUpcomingLessons,
+      refreshRoadmapById,
+      refreshRoadmaps,
+    ],
   );
 
   async function recordActivityEventSafe() {

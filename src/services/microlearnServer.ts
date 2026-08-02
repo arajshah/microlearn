@@ -6,6 +6,7 @@ import {
   RoadmapDepth,
   RoadmapLessonNode,
   RoadmapNodeStatus,
+  RoadmapSummary,
   RoadmapUnit,
 } from '@/types/roadmap';
 import { normalizeRoadmapEntityIds } from '@/utils/roadmapIds';
@@ -161,6 +162,13 @@ interface ServerRoadmap {
   units?: ServerUnit[];
 }
 
+interface ServerRoadmapSummary extends Omit<ServerRoadmap, 'units'> {
+  unitCount: number;
+  lessonCount: number;
+  completedLessonCount: number;
+  progress: number;
+}
+
 function mapNode(node: ServerNode, unitId: string, index: number): RoadmapLessonNode {
   return {
     id: node.id,
@@ -204,18 +212,42 @@ export function mapServerRoadmap(server: ServerRoadmap): GeneratedRoadmap {
   };
 }
 
-/** Fetches published server roadmaps. Returns [] when unavailable. */
-export async function fetchServerRoadmaps(): Promise<GeneratedRoadmap[]> {
+export function mapServerRoadmapSummary(server: ServerRoadmapSummary): RoadmapSummary {
+  const unitCount = Math.max(0, server.unitCount ?? 0);
+  const lessonCount = Math.max(0, server.lessonCount ?? 0);
+  const completedLessonCount = Math.min(
+    lessonCount,
+    Math.max(0, server.completedLessonCount ?? 0),
+  );
+  return {
+    id: server.id,
+    title: server.title,
+    topic: server.topic,
+    goal: server.goal,
+    description: server.description ?? '',
+    masteryLevel: clampMastery(server.masteryLevel),
+    depth: coerceDepth(server.depth),
+    estimatedTotalMinutes: server.estimatedTotalMinutes ?? 0,
+    createdAt: server.createdAt ?? new Date().toISOString(),
+    unitCount,
+    lessonCount,
+    completedLessonCount,
+    progress: lessonCount > 0 ? completedLessonCount / lessonCount : 0,
+  };
+}
+
+/** Fetches active server roadmap summaries. Returns [] when unavailable. */
+export async function fetchServerRoadmaps(): Promise<RoadmapSummary[]> {
   return listServerRoadmaps();
 }
 
 /** Lists active server roadmaps (excludes deleted). */
-export async function listServerRoadmaps(): Promise<GeneratedRoadmap[]> {
-  const data = await getJson<{ roadmaps: ServerRoadmap[] }>('/api/roadmaps');
+export async function listServerRoadmaps(): Promise<RoadmapSummary[]> {
+  const data = await getJson<{ roadmaps: ServerRoadmapSummary[] }>('/api/roadmaps');
   if (!data?.roadmaps) return [];
   return data.roadmaps
     .filter((r) => (r as { status?: string }).status !== 'deleted')
-    .map(mapServerRoadmap);
+    .map(mapServerRoadmapSummary);
 }
 
 async function getJsonDetailed<T>(
@@ -455,6 +487,206 @@ export async function createServerRoadmap(
   return { ok: true, data: mapServerRoadmap(result.data.roadmap) };
 }
 
+/** Thrown when server-side generation fails with a structured error. */
+export class ServerGenerationError extends Error {
+  readonly code?: string;
+  readonly status: number;
+
+  constructor(message: string, opts?: { code?: string; status?: number }) {
+    super(message);
+    this.name = 'ServerGenerationError';
+    this.code = opts?.code;
+    this.status = opts?.status ?? 0;
+  }
+}
+
+async function postJsonDetailedWithTimeout<T>(
+  path: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<{ data: T | null; status: number; errorCode?: string; errorMessage?: string }> {
+  if (!isServerConfigured()) {
+    return { data: null, status: 0, errorMessage: 'Server not configured.' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const json = (await res.json().catch(() => null)) as
+      | T
+      | { error?: { code?: string; message?: string } }
+      | null;
+    if (!res.ok) {
+      const error =
+        json && typeof json === 'object' && 'error' in json
+          ? (json as { error?: { code?: string; message?: string } }).error
+          : undefined;
+      return {
+        data: null,
+        status: res.status,
+        errorCode: error?.code,
+        errorMessage: error?.message ?? `Request failed (${res.status}).`,
+      };
+    }
+    return { data: json as T, status: res.status };
+  } catch {
+    return {
+      data: null,
+      status: 0,
+      errorCode: 'NETWORK_ERROR',
+      errorMessage: 'Could not reach local server. Generation requires a connection.',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const GENERATION_TIMEOUT_MS = 120_000;
+
+function assertGenerationConfigured(): void {
+  if (!isServerConfigured()) {
+    throw new ServerGenerationError(
+      'Connect to the Microlearn server to generate content. Set the server URL and API token in Settings.',
+      { code: 'SERVER_NOT_CONFIGURED' },
+    );
+  }
+}
+
+function throwGenerationFailure(result: {
+  status: number;
+  errorCode?: string;
+  errorMessage?: string;
+}): never {
+  throw new ServerGenerationError(result.errorMessage ?? 'Generation failed.', {
+    code: result.errorCode,
+    status: result.status,
+  });
+}
+
+/** Generate and persist a roadmap on the backend. */
+export async function generateServerRoadmap(input: {
+  topic: string;
+  goal: string;
+  masteryLevel: number;
+  depth: RoadmapDepth;
+  lessonCount: number;
+  slidesPerLesson: number;
+  preferences?: string;
+  sourceUrl?: string;
+  sourceExtractionId?: string;
+  sourceContext?: unknown;
+  idempotencyKey?: string;
+}): Promise<GeneratedRoadmap> {
+  assertGenerationConfigured();
+  const result = await postJsonDetailedWithTimeout<{ roadmap: ServerRoadmap }>(
+    '/api/generation/roadmaps',
+    input,
+    GENERATION_TIMEOUT_MS,
+  );
+  if (!result.data?.roadmap) throwGenerationFailure(result);
+  return normalizeRoadmapEntityIds(mapServerRoadmap(result.data.roadmap));
+}
+
+/** Generate and persist a standalone lesson on the backend. */
+export async function generateServerLesson(input: {
+  subjectId: SubjectId;
+  subjectTitle?: string;
+  topic: string;
+  masteryLevel: MasteryLevel;
+  slideCount?: number;
+  sourceText?: string;
+  sourceUrl?: string;
+  sourceTitle?: string;
+  idempotencyKey?: string;
+}): Promise<GeneratedLesson> {
+  assertGenerationConfigured();
+  const result = await postJsonDetailedWithTimeout<{ lesson: ServerGeneratedLessonRow }>(
+    '/api/generation/lessons',
+    input,
+    GENERATION_TIMEOUT_MS,
+  );
+  if (!result.data?.lesson) throwGenerationFailure(result);
+  return mapServerLessonToApp(result.data.lesson);
+}
+
+/** Generate or reuse a lesson for a roadmap node on the backend. */
+export async function generateServerRoadmapNodeLesson(input: {
+  roadmapId: string;
+  nodeId: string;
+  subjectId?: SubjectId;
+  idempotencyKey?: string;
+}): Promise<{ lesson: GeneratedLesson; roadmap: GeneratedRoadmap; reused: boolean }> {
+  assertGenerationConfigured();
+  const result = await postJsonDetailedWithTimeout<{
+    lesson: ServerGeneratedLessonRow;
+    roadmap: ServerRoadmap;
+    reused: boolean;
+  }>(
+    `/api/generation/roadmaps/${encodeURIComponent(input.roadmapId)}/nodes/${encodeURIComponent(input.nodeId)}/generate`,
+    { subjectId: input.subjectId, idempotencyKey: input.idempotencyKey },
+    GENERATION_TIMEOUT_MS,
+  );
+  if (!result.data?.lesson || !result.data.roadmap) throwGenerationFailure(result);
+  return {
+    lesson: mapServerLessonToApp(result.data.lesson),
+    roadmap: normalizeRoadmapEntityIds(mapServerRoadmap(result.data.roadmap)),
+    reused: Boolean(result.data.reused),
+  };
+}
+
+/** Pregenerate upcoming roadmap lessons on the backend. */
+export async function pregenerateServerRoadmapLessons(input: {
+  roadmapId: string;
+  fromNodeId?: string;
+  count?: number;
+}): Promise<{
+  generated: string[];
+  reused: string[];
+  skipped: string[];
+  failed: Array<{ nodeId: string; errorCode: string }>;
+  roadmap: GeneratedRoadmap;
+}> {
+  assertGenerationConfigured();
+  const result = await postJsonDetailedWithTimeout<{
+    generated: string[];
+    reused: string[];
+    skipped: string[];
+    failed: Array<{ nodeId: string; errorCode: string }>;
+    roadmap: ServerRoadmap;
+  }>(
+    `/api/generation/roadmaps/${encodeURIComponent(input.roadmapId)}/pregenerate`,
+    { fromNodeId: input.fromNodeId, count: input.count },
+    GENERATION_TIMEOUT_MS,
+  );
+  if (!result.data?.roadmap) throwGenerationFailure(result);
+  return {
+    generated: result.data.generated ?? [],
+    reused: result.data.reused ?? [],
+    skipped: result.data.skipped ?? [],
+    failed: result.data.failed ?? [],
+    roadmap: normalizeRoadmapEntityIds(mapServerRoadmap(result.data.roadmap)),
+  };
+}
+
+export async function requestServerTutorReply(
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  context?: string,
+): Promise<string> {
+  assertGenerationConfigured();
+  const result = await postJsonDetailedWithTimeout<{ reply: string }>(
+    '/api/generation/tutor',
+    { messages, context },
+    30_000,
+  );
+  if (!result.data?.reply?.trim()) throwGenerationFailure(result);
+  return result.data.reply.trim();
+}
+
 export interface RoadmapNodePatch {
   status?: RoadmapNodeStatus;
   generatedLessonId?: string | null;
@@ -579,7 +811,7 @@ export interface ExtractSourceResult {
 async function postJsonDetailed<T>(
   path: string,
   body: unknown,
-): Promise<{ data: T | null; status: number; errorMessage?: string }> {
+): Promise<{ data: T | null; status: number; errorCode?: string; errorMessage?: string }> {
   if (!isServerConfigured()) {
     return { data: null, status: 0, errorMessage: 'Server not configured.' };
   }
@@ -592,13 +824,21 @@ async function postJsonDetailed<T>(
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    const json = (await res.json().catch(() => null)) as T | { error?: { message?: string } } | null;
+    const json = (await res.json().catch(() => null)) as
+      | T
+      | { error?: { code?: string; message?: string } }
+      | null;
     if (!res.ok) {
-      const msg =
+      const error =
         json && typeof json === 'object' && 'error' in json
-          ? (json as { error?: { message?: string } }).error?.message
+          ? (json as { error?: { code?: string; message?: string } }).error
           : undefined;
-      return { data: null, status: res.status, errorMessage: msg ?? `Request failed (${res.status}).` };
+      return {
+        data: null,
+        status: res.status,
+        errorCode: error?.code,
+        errorMessage: error?.message ?? `Request failed (${res.status}).`,
+      };
     }
     return { data: json as T, status: res.status };
   } catch {
@@ -841,6 +1081,7 @@ export async function createReviewSetFromLesson(input: {
   existing?: number;
   totalCandidates?: number;
   errorMessage?: string;
+  errorCode?: string;
 }> {
   const result = await postJsonDetailed<{
     reviewSet: ServerReviewSet | null;
@@ -856,6 +1097,7 @@ export async function createReviewSetFromLesson(input: {
     created: result.data?.created,
     existing: result.data?.existing,
     totalCandidates: result.data?.totalCandidates,
+    errorCode: result.errorCode,
     errorMessage: result.errorMessage,
   };
 }

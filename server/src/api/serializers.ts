@@ -62,6 +62,12 @@ export interface GeneratedLessonRow {
   updated_at: string;
 }
 
+export interface RoadmapSummaryCountRow {
+  unit_count: number;
+  lesson_count: number;
+  completed_lesson_count: number;
+}
+
 function parseJsonArray(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw);
@@ -129,7 +135,20 @@ export function serializeRoadmap(
   };
 }
 
-export function serializeRoadmapSummary(row: RoadmapRow) {
+export function serializeRoadmapSummary(
+  row: RoadmapRow,
+  counts: RoadmapSummaryCountRow = {
+    unit_count: 0,
+    lesson_count: 0,
+    completed_lesson_count: 0,
+  },
+) {
+  const unitCount = Math.max(0, counts.unit_count);
+  const lessonCount = Math.max(0, counts.lesson_count);
+  const completedLessonCount = Math.min(
+    lessonCount,
+    Math.max(0, counts.completed_lesson_count),
+  );
   return {
     id: row.id,
     title: row.title,
@@ -144,6 +163,10 @@ export function serializeRoadmapSummary(row: RoadmapRow) {
     updatedAt: row.updated_at,
     publishedAt: row.published_at ?? undefined,
     version: row.version,
+    unitCount,
+    lessonCount,
+    completedLessonCount,
+    progress: lessonCount > 0 ? completedLessonCount / lessonCount : 0,
   };
 }
 

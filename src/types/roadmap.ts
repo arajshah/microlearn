@@ -31,6 +31,27 @@ export interface GeneratedRoadmap {
   sourceUrl?: string;
   sourceExtractionId?: string;
   sourceContext?: RoadmapSourceContext;
+  /** Aggregate list data supplied by the server without replacing nested content. */
+  serverSummary?: RoadmapProgressSummary;
+}
+
+export interface RoadmapProgressSummary {
+  unitCount: number;
+  lessonCount: number;
+  completedLessonCount: number;
+  progress: number;
+}
+
+export interface RoadmapSummary extends RoadmapProgressSummary {
+  id: string;
+  title: string;
+  topic: string;
+  goal: string;
+  description: string;
+  masteryLevel: MasteryLevel;
+  depth: RoadmapDepth;
+  estimatedTotalMinutes: number;
+  createdAt: string;
 }
 
 export interface RoadmapUnit {

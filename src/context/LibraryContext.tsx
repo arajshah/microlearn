@@ -10,12 +10,9 @@ import React, {
   useState,
 } from 'react';
 import { AppState } from 'react-native';
-import { generateLesson } from '@/ai/client';
 import { MasteryLevel } from '@/data/mastery';
-import { DEFAULT_PROVIDER } from '@/ai/providers';
 import { getSubject } from '@/data/subjects';
 import {
-  AiConfig,
   GeneratedLesson,
   Lesson,
   Subject,
@@ -24,10 +21,11 @@ import {
 import { RoadmapLessonContext } from '@/types/roadmap';
 import { GeneratedRoadmap } from '@/types/roadmap';
 import {
-  createServerLesson,
   deleteServerLesson,
+  generateServerLesson,
   getServerLesson,
   isServerConfigured,
+  ServerGenerationError,
 } from '@/services/microlearnServer';
 import { ensureRoadmapSynced } from '@/services/roadmapSync';
 import { unlinkRoadmapNodeAfterLessonDelete } from '@/services/roadmapLessonLink';
@@ -40,16 +38,14 @@ import {
 import { enqueuePendingMutation, pendingDeletedLessonIds, readPendingMutations } from '@/storage/pendingMutations';
 import { normalizeGeneratedLesson, normalizeGeneratedLessons } from '@/utils/normalizeLesson';
 
-const CONFIG_KEY = 'microlearn.ai.config.v1';
-const SECURE_KEY = 'microlearn_ai_api_key';
+const LEGACY_AI_KEY = 'microlearn_ai_api_key';
+const LEGACY_CONFIG_KEY = 'microlearn.ai.config.v1';
 
 interface LibraryContextValue {
-  config: AiConfig;
-  hasKey: boolean;
   hydrated: boolean;
   syncPending: boolean;
+  serverConfigured: boolean;
   generatedLessons: GeneratedLesson[];
-  saveConfig: (partial: Partial<AiConfig>) => Promise<void>;
   generate: (args: {
     subjectId: SubjectId;
     topic: string;
@@ -73,30 +69,35 @@ interface LibraryContextValue {
   resolveLesson: (id: string) => { subject: Subject; lesson: Lesson } | undefined;
 }
 
-const ENV_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '';
-const ENV_BASE_URL = process.env.EXPO_PUBLIC_AI_BASE_URL ?? '';
-const ENV_MODEL = process.env.EXPO_PUBLIC_AI_MODEL ?? '';
-
-const defaultConfig: AiConfig = {
-  baseUrl: ENV_BASE_URL || DEFAULT_PROVIDER.baseUrl,
-  model: ENV_MODEL || DEFAULT_PROVIDER.defaultModel,
-  apiKey: ENV_KEY,
-};
-
 const LibraryContext = createContext<LibraryContextValue | undefined>(undefined);
 
-function makeId(): string {
-  return `gen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+async function cleanupLegacyAiSecrets(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(LEGACY_AI_KEY);
+  } catch {
+    /* already removed or unavailable */
+  }
+  try {
+    const raw = await AsyncStorage.getItem(LEGACY_CONFIG_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as { baseUrl?: string; model?: string };
+    await AsyncStorage.setItem(
+      LEGACY_CONFIG_KEY,
+      JSON.stringify({ baseUrl: parsed.baseUrl ?? '', model: parsed.model ?? '' }),
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
 export function LibraryProvider({ children }: { children: React.ReactNode }) {
-  const [config, setConfig] = useState<AiConfig>(defaultConfig);
   const [generatedLessons, setGeneratedLessons] = useState<GeneratedLesson[]>([]);
   const [deletedLessonIds, setDeletedLessonIds] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [syncPending, setSyncPending] = useState(false);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const appStateRef = useRef(AppState.currentState);
+  const serverConfigured = isServerConfigured();
 
   const applyLessons = useCallback(async (lessons: GeneratedLesson[], deletedIds: string[]) => {
     const normalized = normalizeGeneratedLessons(lessons);
@@ -132,17 +133,8 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [rawConfig, key, pending] = await Promise.all([
-          AsyncStorage.getItem(CONFIG_KEY),
-          SecureStore.getItemAsync(SECURE_KEY).catch(() => null),
-          readPendingMutations(),
-        ]);
-        const parsedConfig = rawConfig ? JSON.parse(rawConfig) : {};
-        setConfig({
-          baseUrl: parsedConfig.baseUrl ?? defaultConfig.baseUrl,
-          model: parsedConfig.model ?? defaultConfig.model,
-          apiKey: key ?? defaultConfig.apiKey,
-        });
+        await cleanupLegacyAiSecrets();
+        const pending = await readPendingMutations();
         const cached = await loadLessonsFromCache(pending);
         setGeneratedLessons(cached.lessons);
         setDeletedLessonIds(cached.deletedIds);
@@ -164,69 +156,25 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [refreshFromBackend]);
 
-  const saveConfig = useCallback<LibraryContextValue['saveConfig']>(
-    async (partial) => {
-      setConfig((prev) => {
-        const next = { ...prev, ...partial };
-        AsyncStorage.setItem(
-          CONFIG_KEY,
-          JSON.stringify({ baseUrl: next.baseUrl, model: next.model }),
-        ).catch(() => {});
-        if (partial.apiKey !== undefined) {
-          if (partial.apiKey) {
-            SecureStore.setItemAsync(SECURE_KEY, partial.apiKey).catch(() => {});
-          } else {
-            SecureStore.deleteItemAsync(SECURE_KEY).catch(() => {});
-          }
-        }
-        return next;
-      });
-    },
-    [],
-  );
-
-  const persistLessonToBackend = useCallback(
-    async (lesson: GeneratedLesson, opts?: { roadmap?: GeneratedRoadmap }) => {
-      if (!isServerConfigured()) {
-        await enqueuePendingMutation('create_lesson', { lesson, roadmap: opts?.roadmap });
-        setSyncPending(true);
-        return lesson;
-      }
-
-      if (lesson.roadmapId && opts?.roadmap) {
-        const sync = await ensureRoadmapSynced(opts.roadmap);
-        if (!sync.ok) {
-          console.warn('[lesson-save] roadmap not synced; queueing lesson', sync.errorMessage);
-          await enqueuePendingMutation('create_lesson', { lesson, roadmap: opts.roadmap });
-          setSyncPending(true);
-          return lesson;
-        }
-      }
-
-      const result = await createServerLesson({ lesson });
-      if (!result.ok) {
-        console.warn('[lesson-save] backend save failed; queueing lesson', result.errorMessage);
-        await enqueuePendingMutation('create_lesson', { lesson, roadmap: opts?.roadmap });
-        setSyncPending(true);
-        return lesson;
-      }
-      return result.data ? normalizeGeneratedLesson(result.data) : lesson;
-    },
-    [],
-  );
-
-  const saveGeneratedLesson = useCallback<LibraryContextValue['saveGeneratedLesson']>(
-    async (lesson, opts) => {
-      const saved = await persistLessonToBackend(lesson, opts);
+  const cacheLesson = useCallback(
+    async (lesson: GeneratedLesson) => {
+      const saved = normalizeGeneratedLesson(lesson);
       setGeneratedLessons((prev) => {
         const idx = prev.findIndex((l) => l.id === saved.id);
-        const next =
-          idx === -1 ? [saved, ...prev] : prev.map((l, i) => (i === idx ? saved : l));
+        const next = idx === -1 ? [saved, ...prev] : prev.map((l, i) => (i === idx ? saved : l));
         persistLessonsCache(next, deletedLessonIds).catch(() => {});
         return next;
       });
+      return saved;
     },
-    [deletedLessonIds, persistLessonToBackend],
+    [deletedLessonIds],
+  );
+
+  const saveGeneratedLesson = useCallback<LibraryContextValue['saveGeneratedLesson']>(
+    async (lesson) => {
+      await cacheLesson(lesson);
+    },
+    [cacheLesson],
   );
 
   const generate = useCallback<LibraryContextValue['generate']>(
@@ -238,43 +186,30 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       sourceText,
       sourceUrl,
       sourceTitle,
-      roadmapContext,
-      roadmapId,
-      roadmapNodeId,
     }) => {
       const subject = getSubject(subjectId);
       if (!subject) throw new Error('Unknown subject.');
-      const draft = await generateLesson(config, {
-        subject,
+      if (!isServerConfigured()) {
+        throw new ServerGenerationError(
+          'Connect to the Microlearn server to generate lessons.',
+          { code: 'SERVER_NOT_CONFIGURED' },
+        );
+      }
+      const lesson = await generateServerLesson({
+        subjectId,
+        subjectTitle: subject.title,
         topic,
         masteryLevel,
         slideCount,
         sourceText,
         sourceUrl,
         sourceTitle,
-        roadmapContext,
+        idempotencyKey: `${subjectId}:${topic}:${Date.now()}`,
       });
-      const lesson: GeneratedLesson = {
-        ...draft,
-        id: makeId(),
-        subjectId,
-        topic: topic.trim() || (sourceText ? draft.title : subject.title),
-        createdAt: new Date().toISOString(),
-        generated: true,
-        roadmapId,
-        roadmapNodeId,
-        sourceUrl,
-        sourceTitle,
-      };
-      const saved = await persistLessonToBackend(lesson);
-      setGeneratedLessons((prev) => {
-        const next = [saved, ...prev.filter((l) => l.id !== saved.id)];
-        persistLessonsCache(next, deletedLessonIds).catch(() => {});
-        return next;
-      });
-      return saved;
+      await cacheLesson(lesson);
+      return lesson;
     },
-    [config, deletedLessonIds, persistLessonToBackend],
+    [cacheLesson],
   );
 
   const resolveGeneratedLessonById = useCallback<
@@ -336,12 +271,10 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<LibraryContextValue>(() => {
     const getGenerated = (id: string) => generatedLessons.find((l) => l.id === id);
     return {
-      config,
-      hasKey: Boolean(config.apiKey),
       hydrated,
       syncPending,
+      serverConfigured,
       generatedLessons,
-      saveConfig,
       generate,
       saveGeneratedLesson,
       deleteLesson,
@@ -358,16 +291,15 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
       },
     };
   }, [
-    config,
-    hydrated,
-    syncPending,
-    generatedLessons,
-    saveConfig,
-    generate,
-    saveGeneratedLesson,
     deleteLesson,
+    generate,
+    generatedLessons,
+    hydrated,
     refreshFromBackend,
     resolveGeneratedLessonById,
+    saveGeneratedLesson,
+    serverConfigured,
+    syncPending,
   ]);
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;
@@ -375,6 +307,6 @@ export function LibraryProvider({ children }: { children: React.ReactNode }) {
 
 export function useLibrary(): LibraryContextValue {
   const ctx = useContext(LibraryContext);
-  if (!ctx) throw new Error('useLibrary must be used within a LibraryProvider');
+  if (!ctx) throw new Error('useLibrary must be used within LibraryProvider');
   return ctx;
 }

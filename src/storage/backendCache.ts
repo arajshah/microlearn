@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GeneratedLesson } from '@/types/content';
-import { GeneratedRoadmap } from '@/types/roadmap';
+import { GeneratedRoadmap, RoadmapSummary } from '@/types/roadmap';
 import { findRoadmapNode, recalculateRoadmapStatuses } from '@/utils/roadmapProgress';
 
 export const CACHE_LESSONS_KEY = 'microlearn.cache.lessons.v1';
@@ -148,5 +148,47 @@ export function mergeRoadmapPreservingLocalProgress(
       }),
     })),
   };
-  return recalculateRoadmapStatuses(merged);
+  const recalculated = recalculateRoadmapStatuses(merged);
+  const lessons = recalculated.units.flatMap((unit) => unit.lessons);
+  const completedLessonCount = lessons.filter((lesson) => lesson.status === 'completed').length;
+  return {
+    ...recalculated,
+    serverSummary: {
+      unitCount: recalculated.units.length,
+      lessonCount: lessons.length,
+      completedLessonCount,
+      progress: lessons.length > 0 ? completedLessonCount / lessons.length : 0,
+    },
+  };
+}
+
+/** Applies list metadata and counts without treating a summary as nested roadmap content. */
+export function mergeRoadmapSummary(
+  local: GeneratedRoadmap,
+  summary: RoadmapSummary,
+): GeneratedRoadmap {
+  const localCompleted = local.units
+    .flatMap((unit) => unit.lessons)
+    .filter((lesson) => lesson.status === 'completed').length;
+  const completedLessonCount = Math.min(
+    summary.lessonCount,
+    Math.max(localCompleted, summary.completedLessonCount),
+  );
+  return {
+    ...local,
+    title: summary.title,
+    topic: summary.topic,
+    goal: summary.goal,
+    description: summary.description,
+    masteryLevel: summary.masteryLevel,
+    depth: summary.depth,
+    estimatedTotalMinutes: summary.estimatedTotalMinutes,
+    createdAt: summary.createdAt,
+    serverSummary: {
+      unitCount: summary.unitCount,
+      lessonCount: summary.lessonCount,
+      completedLessonCount,
+      progress: summary.lessonCount > 0 ? completedLessonCount / summary.lessonCount : 0,
+    },
+  };
 }

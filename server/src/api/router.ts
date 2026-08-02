@@ -19,6 +19,7 @@ import {
   createLearningRouter,
   createRemediationRouter,
 } from './routes/adaptive';
+import { createGenerationRouter } from './routes/generation';
 
 /** Assembles the /api router with health, roadmaps, lessons, outcomes, plus JSON error handling. */
 export function createApiRouter(config: ServerConfig, db: Db): Router {
@@ -41,6 +42,7 @@ export function createApiRouter(config: ServerConfig, db: Db): Router {
   router.use('/learning', createLearningRouter(db));
   router.use('/diagnostics', createDiagnosticsRouter(db));
   router.use('/remediation', createRemediationRouter(db));
+  router.use('/generation', createGenerationRouter(db));
 
   router.use((_req: Request, res: Response) => {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Unknown API route.' } });

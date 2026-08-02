@@ -13,9 +13,15 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AiError, tutorReply, TutorMessage } from '@/ai/client';
 import { useLibrary } from '@/context/LibraryContext';
+import {
+  isServerConfigured,
+  requestServerTutorReply,
+  ServerGenerationError,
+} from '@/services/microlearnServer';
 import { colors, font, radius, spacing } from '@/theme/theme';
+
+type TutorMessage = { role: 'user' | 'assistant'; content: string };
 
 const SUGGESTIONS = [
   'Explain this simply',
@@ -71,7 +77,7 @@ export function TutorPanel({
   onKeyboardChange,
 }: TutorPanelProps) {
   const insets = useSafeAreaInsets();
-  const { config, hasKey } = useLibrary();
+  const { serverConfigured } = useLibrary();
   const [messages, setMessages] = useState<TutorMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -104,8 +110,8 @@ export function TutorPanel({
   const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
-    if (!hasKey) {
-      setError('Add your AI key in Settings to chat with the tutor.');
+    if (!serverConfigured || !isServerConfigured()) {
+      setError('Connect to the Microlearn server in Settings to chat with the tutor.');
       return;
     }
     setError(null);
@@ -118,10 +124,10 @@ export function TutorPanel({
     setLoading(true);
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     try {
-      const reply = await tutorReply(config, history, context);
+      const reply = await requestServerTutorReply(history, context);
       setMessages((m) => [...m, { role: 'assistant', content: reply }]);
     } catch (e) {
-      const msg = e instanceof AiError ? e.message : 'Something went wrong. Try again.';
+      const msg = e instanceof ServerGenerationError ? e.message : 'Something went wrong. Try again.';
       setError(msg);
     } finally {
       setLoading(false);
@@ -235,9 +241,9 @@ export function TutorPanel({
           style={styles.input}
           value={input}
           onChangeText={setInput}
-          placeholder={hasKey ? 'Ask the tutor…' : 'Add an AI key in Settings'}
+          placeholder={serverConfigured ? 'Ask the tutor…' : 'Connect server in Settings'}
           placeholderTextColor={colors.textFaint}
-          editable={hasKey}
+          editable={serverConfigured}
           multiline
           blurOnSubmit
           onSubmitEditing={() => send(input)}

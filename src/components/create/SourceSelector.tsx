@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { UrlImportPanel } from '@/components/create/UrlImportPanel';
 import { ServerSourcePreview } from '@/components/create/ServerSourcePreview';
 import { ServerSourceDocument } from '@/services/microlearnServer';
 import { ExtractedUrlSource, RoadmapSourceContext } from '@/types/urlSource';
@@ -206,16 +205,6 @@ export function SourceSelector({
                 Link import is ready for public documents. Upload is still coming soon.
               </Text>
             </>
-          ) : apiKey && onUrlSourceConfirmed && onUrlSourceCleared ? (
-            <UrlImportPanel
-              apiKey={apiKey}
-              url={url}
-              onUrlChange={onUrlChange}
-              disabled={disabled}
-              confirmedSource={confirmedUrlSource ?? null}
-              onSourceConfirmed={onUrlSourceConfirmed}
-              onSourceCleared={onUrlSourceCleared}
-            />
           ) : (
             <>
               <Text style={styles.label}>Document link</Text>
@@ -231,8 +220,7 @@ export function SourceSelector({
                 editable={!disabled}
               />
               <Text style={styles.hint}>
-                Set EXPO_PUBLIC_MICROLEARN_API_BASE_URL to enable backend extraction, or add a Gemini
-                key for in-app URL import.
+                Set EXPO_PUBLIC_MICROLEARN_API_BASE_URL to enable backend URL extraction.
               </Text>
             </>
           )}

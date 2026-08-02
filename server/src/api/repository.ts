@@ -8,6 +8,7 @@ import {
   type GeneratedLessonRow,
   type LessonNodeRow,
   type RoadmapRow,
+  type RoadmapSummaryCountRow,
   type UnitRow,
 } from './serializers';
 import type { LessonPatchInput, LessonUpsertInput, RoadmapCreateInput, RoadmapNodePatchInput, RoadmapPatchInput, RoadmapStatus } from './validators';
@@ -67,10 +68,24 @@ export function getRoadmap(db: Db, id: string) {
 
 /** Lists roadmap summaries, optionally filtered by status. */
 export function listRoadmaps(db: Db, status?: RoadmapStatus) {
-  const rows = status
-    ? (db.prepare('SELECT * FROM roadmaps WHERE status = ? ORDER BY updated_at DESC').all(status) as RoadmapRow[])
-    : (db.prepare("SELECT * FROM roadmaps WHERE status != 'deleted' ORDER BY updated_at DESC").all() as RoadmapRow[]);
-  return rows.map(serializeRoadmapSummary);
+  const where = status ? 'WHERE roadmaps.status = ?' : "WHERE roadmaps.status != 'deleted'";
+  const rows = db
+    .prepare(
+      `SELECT roadmaps.*,
+         COUNT(DISTINCT roadmap_units.id) AS unit_count,
+         COUNT(lesson_nodes.id) AS lesson_count,
+         COALESCE(SUM(CASE WHEN lesson_nodes.status = 'completed' THEN 1 ELSE 0 END), 0)
+           AS completed_lesson_count
+       FROM roadmaps
+       LEFT JOIN roadmap_units ON roadmap_units.roadmap_id = roadmaps.id
+       LEFT JOIN lesson_nodes ON lesson_nodes.roadmap_id = roadmaps.id
+         AND lesson_nodes.unit_id = roadmap_units.id
+       ${where}
+       GROUP BY roadmaps.id
+       ORDER BY roadmaps.updated_at DESC`,
+    )
+    .all(...(status ? [status] : [])) as Array<RoadmapRow & RoadmapSummaryCountRow>;
+  return rows.map((row) => serializeRoadmapSummary(row, row));
 }
 
 /** Creates a roadmap with nested units and lesson nodes in a single transaction. */

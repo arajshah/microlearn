@@ -41,7 +41,7 @@ const seedSchema = z.object({
 
 const reviewSetCreateSchema = z.object({
   lessonId: z.string().min(1),
-  lesson: z.record(z.string(), z.unknown()),
+  lesson: z.record(z.string(), z.unknown()).optional(),
   roadmapId: z.string().optional(),
   lessonNodeId: z.string().optional(),
   force: z.boolean().optional(),

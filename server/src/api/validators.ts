@@ -108,6 +108,52 @@ export const roadmapNodePatchSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required.' });
 
+export const generateRoadmapBodySchema = z.object({
+  topic: z.string().min(1),
+  goal: z.string().min(1),
+  masteryLevel: z.number().int().min(1).max(5),
+  depth: z.enum(['quick', 'standard', 'deep']),
+  lessonCount: z.number().int().min(3).max(30),
+  slidesPerLesson: z.number().int().min(3).max(20),
+  preferences: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  sourceExtractionId: z.string().optional(),
+  sourceContext: z.unknown().optional(),
+  idempotencyKey: z.string().optional(),
+});
+
+export const generateLessonBodySchema = z.object({
+  subjectId: z.string().min(1),
+  subjectTitle: z.string().optional(),
+  topic: z.string().min(1),
+  masteryLevel: z.number().int().min(1).max(5),
+  slideCount: z.number().int().min(3).max(20).optional(),
+  sourceText: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  sourceTitle: z.string().optional(),
+  idempotencyKey: z.string().optional(),
+});
+
+export const generateNodeLessonBodySchema = z.object({
+  subjectId: z.string().min(1).optional(),
+  idempotencyKey: z.string().optional(),
+});
+
+export const pregenerateRoadmapBodySchema = z.object({
+  fromNodeId: z.string().optional(),
+  count: z.number().int().min(0).max(5).optional(),
+});
+
+export const tutorReplyBodySchema = z.object({
+  messages: z.array(
+    z.object({
+      role: z.enum(['user', 'assistant']),
+      content: z.string().min(1),
+    }),
+  ).min(1),
+  context: z.string().optional(),
+});
+
 export type RoadmapCreateInput = z.infer<typeof roadmapCreateSchema>;
 export type RoadmapPatchInput = z.infer<typeof roadmapPatchSchema>;
 export type RoadmapNodePatchInput = z.infer<typeof roadmapNodePatchSchema>;

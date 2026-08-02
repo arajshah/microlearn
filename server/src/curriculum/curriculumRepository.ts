@@ -8,6 +8,7 @@ import {
   type GeneratedLessonRow,
   type LessonNodeRow,
   type RoadmapRow,
+  type RoadmapSummaryCountRow,
   type UnitRow,
 } from '../api/serializers';
 import {
@@ -146,26 +147,32 @@ export interface ListRoadmapsOptions {
 }
 
 export function listRoadmaps(db: Db, options: ListRoadmapsOptions = {}) {
-  const { status, includeCounts } = options;
-  let rows: RoadmapRow[];
-  if (!status || status === 'all') {
-    rows = db.prepare("SELECT * FROM roadmaps WHERE status != 'deleted' ORDER BY updated_at DESC").all() as RoadmapRow[];
-    if (status === 'all') {
-      rows = db.prepare('SELECT * FROM roadmaps ORDER BY updated_at DESC').all() as RoadmapRow[];
-    }
-  } else {
-    rows = db
-      .prepare('SELECT * FROM roadmaps WHERE status = ? ORDER BY updated_at DESC')
-      .all(status) as RoadmapRow[];
-  }
-
-  return rows.map((row) => {
-    const summary = serializeRoadmapSummary(row);
-    if (!includeCounts) return summary;
-    const unitCount = (db.prepare('SELECT COUNT(*) AS c FROM roadmap_units WHERE roadmap_id = ?').get(row.id) as { c: number }).c;
-    const lessonCount = (db.prepare('SELECT COUNT(*) AS c FROM lesson_nodes WHERE roadmap_id = ?').get(row.id) as { c: number }).c;
-    return { ...summary, unitCount, lessonCount };
-  });
+  const { status } = options;
+  const where =
+    status === 'all'
+      ? ''
+      : status
+        ? 'WHERE roadmaps.status = ?'
+        : "WHERE roadmaps.status != 'deleted'";
+  const rows = db
+    .prepare(
+      `SELECT roadmaps.*,
+         COUNT(DISTINCT roadmap_units.id) AS unit_count,
+         COUNT(lesson_nodes.id) AS lesson_count,
+         COALESCE(SUM(CASE WHEN lesson_nodes.status = 'completed' THEN 1 ELSE 0 END), 0)
+           AS completed_lesson_count
+       FROM roadmaps
+       LEFT JOIN roadmap_units ON roadmap_units.roadmap_id = roadmaps.id
+       LEFT JOIN lesson_nodes ON lesson_nodes.roadmap_id = roadmaps.id
+         AND lesson_nodes.unit_id = roadmap_units.id
+       ${where}
+       GROUP BY roadmaps.id
+       ORDER BY roadmaps.updated_at DESC`,
+    )
+    .all(...(status && status !== 'all' ? [status] : [])) as Array<
+    RoadmapRow & RoadmapSummaryCountRow
+  >;
+  return rows.map((row) => serializeRoadmapSummary(row, row));
 }
 
 export interface GetRoadmapOptions {

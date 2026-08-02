@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GeneratedLesson } from '@/types/content';
-import { GeneratedRoadmap } from '@/types/roadmap';
+import { GeneratedRoadmap, RoadmapSummary } from '@/types/roadmap';
 import { allRoadmapLessons, recalculateRoadmapStatuses } from '@/utils/roadmapProgress';
 import {
   createServerLesson,
@@ -9,6 +9,7 @@ import {
   deleteReviewSet,
   deleteServerLesson,
   deleteServerRoadmap,
+  fetchServerRoadmap,
   fetchServerRoadmapMeta,
   isServerConfigured,
   listServerLessons,
@@ -21,7 +22,7 @@ import {
   isBackendTruthMigrated,
   markBackendTruthMigrated,
   mergeLessonsByUpdatedAt,
-  mergeRoadmapsByUpdatedAt,
+  mergeRoadmapSummary,
   readLessonsCache,
   readRoadmapsCache,
   writeLessonsCache,
@@ -118,10 +119,10 @@ async function reconcileLocalRoadmapsWithBackend(
   local: GeneratedRoadmap[],
   deletedIds: string[],
   pending: PendingMutation[],
+  remote: RoadmapSummary[],
 ): Promise<{ roadmaps: GeneratedRoadmap[]; deletedIds: string[] }> {
   if (!isServerConfigured()) return { roadmaps: local, deletedIds };
 
-  const remote = await listServerRoadmaps();
   const remoteIds = new Set(remote.map((r) => r.id));
   const pendingCreateIds = new Set(
     pending
@@ -167,10 +168,34 @@ export async function refreshRoadmapsFromBackend(
 ): Promise<{ roadmaps: GeneratedRoadmap[]; deletedIds: string[] }> {
   if (!isServerConfigured()) return { roadmaps: local, deletedIds };
   const pendingMutations = pending.length > 0 ? pending : await readPendingMutations();
-  const reconciled = await reconcileLocalRoadmapsWithBackend(local, deletedIds, pendingMutations);
-  const remote = normalizeRoadmapEntityIdsList(await listServerRoadmaps());
+  const remote = await listServerRoadmaps();
+  const reconciled = await reconcileLocalRoadmapsWithBackend(
+    local,
+    deletedIds,
+    pendingMutations,
+    remote,
+  );
   const deleted = new Set(reconciled.deletedIds);
-  const merged = mergeRoadmapsByUpdatedAt(reconciled.roadmaps, remote, deleted);
+  const byId = new Map(reconciled.roadmaps.map((roadmap) => [roadmap.id, roadmap]));
+  const newlyDiscovered = remote.filter(
+    (summary) => !deleted.has(summary.id) && !byId.has(summary.id),
+  );
+  const fullNewRoadmaps = await Promise.all(
+    newlyDiscovered.map((summary) => fetchServerRoadmap(summary.id)),
+  );
+
+  for (const summary of remote) {
+    if (deleted.has(summary.id)) continue;
+    const existing = byId.get(summary.id);
+    if (existing) byId.set(summary.id, mergeRoadmapSummary(existing, summary));
+  }
+  for (const roadmap of fullNewRoadmaps) {
+    if (roadmap && !deleted.has(roadmap.id)) byId.set(roadmap.id, roadmap);
+  }
+
+  const merged = [...byId.values()].sort(
+    (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0),
+  );
   return { roadmaps: normalizeRoadmapEntityIdsList(merged), deletedIds: reconciled.deletedIds };
 }
 

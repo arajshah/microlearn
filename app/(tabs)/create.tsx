@@ -30,7 +30,6 @@ import { SubjectId } from '@/types/content';
 import { RoadmapDepth, LESSON_SLIDE_PRESETS, ROADMAP_LESSON_PRESETS, ROADMAP_SLIDES_PRESETS } from '@/types/roadmap';
 import { ExtractedUrlSource, RoadmapSourceContext } from '@/types/urlSource';
 import { suggestedMasteryLevel } from '@/utils/adaptive';
-import { resolveGeminiApiKey } from '@/utils/geminiKey';
 import { formatSourceAsText } from '@/utils/urlSourceContext';
 import { isUrlInput, normalizeUrl } from '@/utils/urlValidation';
 import { roadmapStats } from '@/utils/roadmapProgress';
@@ -268,9 +267,8 @@ function MasterySelector({
 export default function CreateScreen() {
   const router = useRouter();
   const {
-    hasKey,
+    serverConfigured,
     hydrated,
-    config,
     generate,
     generatedLessons,
     deleteLesson,
@@ -343,7 +341,6 @@ export default function CreateScreen() {
   }, [lessonDepth, masteryLevel]);
 
   const subject = subjects.find((s) => s.id === subjectId)!;
-  const geminiKey = resolveGeminiApiKey(config);
 
   const recommended = useMemo(
     () => suggestedMasteryLevel(level, subjectProgress(subjectId).pct),
@@ -657,7 +654,7 @@ export default function CreateScreen() {
   };
 
   const lessonGenerateDisabled =
-    !hasKey ||
+    !serverConfigured ||
     lessonLoading ||
     lessonFileLoading ||
     (lessonSourceType === 'paste' && lessonPaste.trim().length < 80) ||
@@ -674,7 +671,7 @@ export default function CreateScreen() {
       !resolveLessonUrl());
 
   const roadmapGenerateDisabled =
-    !hasKey ||
+    !serverConfigured ||
     !rmTopic.trim() ||
     !rmGoal.trim() ||
     rmFileLoading ||
@@ -691,8 +688,8 @@ export default function CreateScreen() {
       !rmUrlSource &&
       !resolveRoadmapUrl());
 
-  const apiKeyBanner =
-    hydrated && !hasKey ? (
+  const serverBanner =
+    hydrated && !serverConfigured ? (
       <Pressable onPress={() => router.push('/settings')}>
         <LinearGradient
           colors={gradients.create}
@@ -700,11 +697,11 @@ export default function CreateScreen() {
           end={{ x: 1, y: 1 }}
           style={styles.setupCard}
         >
-          <Ionicons name="key" size={26} color={colors.white} />
+          <Ionicons name="cloud-outline" size={26} color={colors.white} />
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.setupTitle}>Connect an AI model</Text>
+            <Text style={styles.setupTitle}>Connect to Microlearn server</Text>
             <Text style={styles.setupText} numberOfLines={2}>
-              Add a free API key to start generating lessons and roadmaps.
+              Set your server URL and API token in Settings to generate lessons and roadmaps.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.white} />
@@ -734,7 +731,7 @@ export default function CreateScreen() {
         </Pressable>
       </View>
 
-      {apiKeyBanner}
+      {serverBanner}
 
       <TabSegment tab={tab} onChange={setTab} />
 
@@ -757,8 +754,7 @@ export default function CreateScreen() {
               onPasteTextChange={setLessonPaste}
               url={lessonUrl}
               onUrlChange={setLessonUrl}
-              disabled={lessonLoading || !hasKey}
-              apiKey={geminiKey}
+              disabled={lessonLoading || !serverConfigured}
               confirmedUrlSource={lessonUrlSource}
               onUrlSourceConfirmed={handleLessonUrlConfirmed}
               onUrlSourceCleared={() => {
@@ -873,7 +869,7 @@ export default function CreateScreen() {
                       lessonGenerateDisabled && { color: colors.textFaint },
                     ]}
                   >
-                    {!hasKey ? 'Add an API key first' : 'Generate lesson'}
+                    {!serverConfigured ? 'Connect server in Settings' : 'Generate lesson'}
                   </Text>
                 </>
               )}
@@ -899,8 +895,7 @@ export default function CreateScreen() {
               onPasteTextChange={setRmPaste}
               url={rmUrl}
               onUrlChange={setRmUrl}
-              disabled={generatingRoadmap || !hasKey}
-              apiKey={geminiKey}
+              disabled={generatingRoadmap || !serverConfigured}
               confirmedUrlSource={rmUrlSource}
               onUrlSourceConfirmed={handleRoadmapUrlConfirmed}
               onUrlSourceCleared={() => {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ToolError } from './repoSafety';
+import { ApiError } from '../api/apiError';
 
 /** Concise catalog of the tools this MCP server exposes (read-only). */
 export const TOOL_CATALOG: ReadonlyArray<{ name: string; description: string }> = [
@@ -226,6 +227,7 @@ export async function runTool(handler: () => Promise<unknown> | unknown): Promis
     return toolOk(await handler());
   } catch (err) {
     if (err instanceof ToolError) return toolFail(err.code, err.message);
+    if (err instanceof ApiError) return toolFail(err.code ?? 'INVALID_INPUT', err.message);
     const message = err instanceof Error ? err.message : 'Unexpected tool error.';
     return toolFail('INVALID_INPUT', message);
   }

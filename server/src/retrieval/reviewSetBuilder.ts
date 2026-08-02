@@ -72,7 +72,10 @@ export function buildReviewSetCandidates(
     const card = raw as Record<string, unknown>;
     const type = text(card.type);
     const id = cardId(card, index, lessonId);
-    const source = { sourceRef: id, metadata: { cardIndex: index, cardType: type } };
+    const source = (itemType: string) => ({
+      sourceRef: `${id}#${itemType}`,
+      metadata: { cardIndex: index, cardType: type },
+    });
 
     if (type === 'quiz' || type === 'application' || type === 'prediction') {
       const question = text(card.question);
@@ -80,7 +83,7 @@ export function buildReviewSetCandidates(
       const answerIndex = Number(card.answerIndex);
       if (question && options.length >= 2 && Number.isInteger(answerIndex) && answerIndex >= 0 && answerIndex < options.length) {
         pushUnique(out, {
-          ...source,
+          ...source(type === 'quiz' ? 'mcq' : 'tiny_application'),
           itemType: type === 'quiz' ? 'mcq' : 'tiny_application',
           prompt: question,
           answer: options[answerIndex],
@@ -99,7 +102,7 @@ export function buildReviewSetCandidates(
       const answerIndex = Number(card.answerIndex);
       if (question && options.length >= 2 && Number.isInteger(answerIndex) && answerIndex >= 0 && answerIndex < options.length) {
         pushUnique(out, {
-          ...source,
+          ...source('mistake_check'),
           itemType: 'mistake_check',
           prompt: question,
           answer: options[answerIndex],
@@ -116,7 +119,7 @@ export function buildReviewSetCandidates(
       const statement = text(card.statement);
       if (statement && typeof card.answer === 'boolean') {
         pushUnique(out, {
-          ...source,
+          ...source('mistake_check'),
           itemType: 'mistake_check',
           prompt: statement,
           answer: card.answer ? 'True' : 'False',
@@ -132,7 +135,7 @@ export function buildReviewSetCandidates(
     const body = text(card.keyTermDef) || text(card.body);
     if (heading && body) {
       pushUnique(out, {
-        ...source,
+        ...source('concept_recall'),
         itemType: 'concept_recall',
         prompt: `What is ${heading}?`,
         answer: firstSentence(body),
@@ -144,7 +147,7 @@ export function buildReviewSetCandidates(
       const cloze = makeCloze(firstSentence(body));
       if (cloze) {
         pushUnique(out, {
-          ...source,
+          ...source('cloze'),
           itemType: 'cloze',
           prompt: cloze.prompt,
           answer: cloze.answer,
@@ -159,7 +162,7 @@ export function buildReviewSetCandidates(
       const points = textArray(card.points);
       if (points.length > 0) {
         pushUnique(out, {
-          ...source,
+          ...source('summary_recall'),
           itemType: 'summary_recall',
           prompt: `Summarize the main takeaways from ${title}.`,
           answer: points.slice(0, 5).join('\n'),

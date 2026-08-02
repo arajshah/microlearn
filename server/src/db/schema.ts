@@ -687,4 +687,95 @@ export const MIGRATIONS: readonly Migration[] = [
         ON automation_audit_events(tool_name, created_at);
     `,
   },
+  {
+    id: '0010_review_integrity_and_roadmap_counts',
+    sql: `
+      DROP INDEX IF EXISTS idx_retrieval_items_source_ref;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retrieval_items_source_ref_active
+        ON retrieval_items(lesson_id, source_ref)
+        WHERE status != 'deleted';
+
+      UPDATE retrieval_items
+      SET review_set_id = (
+        SELECT keeper.id
+        FROM review_sets AS old_set
+        JOIN review_sets AS keeper ON keeper.lesson_id = old_set.lesson_id
+        WHERE old_set.id = retrieval_items.review_set_id
+          AND keeper.status = 'active'
+        ORDER BY keeper.created_at DESC, keeper.id DESC
+        LIMIT 1
+      )
+      WHERE review_set_id IN (
+        SELECT older.id
+        FROM review_sets AS older
+        WHERE older.status = 'active'
+          AND older.id != (
+            SELECT newest.id
+            FROM review_sets AS newest
+            WHERE newest.lesson_id = older.lesson_id AND newest.status = 'active'
+            ORDER BY newest.created_at DESC, newest.id DESC
+            LIMIT 1
+          )
+      );
+
+      UPDATE review_sets
+      SET status = 'deleted', updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'active'
+        AND id != (
+          SELECT newest.id
+          FROM review_sets AS newest
+          WHERE newest.lesson_id = review_sets.lesson_id AND newest.status = 'active'
+          ORDER BY newest.created_at DESC, newest.id DESC
+          LIMIT 1
+        );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_review_sets_lesson_active
+        ON review_sets(lesson_id)
+        WHERE status = 'active';
+    `,
+  },
+  {
+    id: '0011_server_generation_jobs',
+    sql: `
+      CREATE TABLE IF NOT EXISTS generation_jobs (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT,
+        status TEXT NOT NULL,
+        request_json TEXT NOT NULL DEFAULT '{}',
+        result_entity_id TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_generation_jobs_status
+        ON generation_jobs(status, updated_at);
+
+      CREATE INDEX IF NOT EXISTS idx_generation_jobs_entity
+        ON generation_jobs(entity_type, entity_id);
+
+      UPDATE generated_lessons
+      SET status = 'archived'
+      WHERE status = 'active'
+        AND lesson_node_id IS NOT NULL
+        AND id NOT IN (
+          SELECT newest.id
+          FROM generated_lessons AS newest
+          WHERE newest.lesson_node_id = generated_lessons.lesson_node_id
+            AND newest.status = 'active'
+          ORDER BY newest.updated_at DESC, newest.id DESC
+          LIMIT 1
+        );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_generated_lessons_active_node_unique
+        ON generated_lessons(lesson_node_id)
+        WHERE status = 'active' AND lesson_node_id IS NOT NULL;
+    `,
+  },
 ];

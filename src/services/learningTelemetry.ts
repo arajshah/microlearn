@@ -208,8 +208,8 @@ export function trackCardAnswered(
 export function trackLessonCompleted(
   ctx: LessonTelemetryContext,
   input: { correctCount: number; totalCount: number; accuracy: number },
-): void {
-  trackLearningEvent({
+): Promise<void> {
+  return emitLearningEvent({
     eventType: 'lesson_completed',
     lessonId: ctx.lessonId,
     roadmapId: ctx.roadmapId,

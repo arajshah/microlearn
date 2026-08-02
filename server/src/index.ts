@@ -5,6 +5,7 @@ import { logger } from './logger';
 import { createHealthRouter } from './routes/health';
 import { createMcpRouter } from './mcp/mcpServer';
 import { createApiRouter } from './api/router';
+import { repairStaleGenerationJobs } from './generation/generationService';
 import { isOAuthConfigured } from './config';
 import {
   createMcpAuthMiddleware,
@@ -15,6 +16,10 @@ import {
 function main(): void {
   const config = loadConfig();
   const db = initDatabase(config);
+  const repairedJobs = repairStaleGenerationJobs(db);
+  if (repairedJobs > 0) {
+    logger.info('Repaired stale generation jobs on startup', { count: repairedJobs });
+  }
 
   const app = express();
   app.use(express.json({ limit: '4mb' }));
@@ -51,6 +56,7 @@ function main(): void {
       gitPush: config.enableGitPush,
       requireAuth: config.requireAuth,
       oauthResourceServer: isOAuthConfigured(config),
+      serverGeneration: Boolean(process.env.MICROLEARN_AI_API_KEY?.trim()),
     });
   });
 

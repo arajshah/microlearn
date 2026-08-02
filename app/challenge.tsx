@@ -32,7 +32,7 @@ export default function ChallengeSession() {
   const router = useRouter();
   const { awardXp } = useProgress();
   const { recordToday, todayResult } = useChallenge();
-  const { generatedLessons, config, hasKey } = useLibrary();
+  const { generatedLessons } = useLibrary();
 
   const today = dayKey();
   const [loading, setLoading] = useState(true);
@@ -47,8 +47,6 @@ export default function ChallengeSession() {
       const challenge = await getTodayChallenge({
         dayKey: today,
         generatedLessons,
-        config,
-        hasKey,
       });
       if (cancelled) return;
       const items: ChallengeItem[] = challenge.questions.map((q) => ({
@@ -64,7 +62,7 @@ export default function ChallengeSession() {
     return () => {
       cancelled = true;
     };
-  }, [today, generatedLessons, config, hasKey]);
+  }, [today, generatedLessons]);
 
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);

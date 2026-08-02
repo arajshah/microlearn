@@ -1,6 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { requestJsonCompletion } from '@/ai/jsonCompletion';
-import { AiConfig } from '@/types/content';
 import { GeneratedLesson, QuizCard, SubjectId } from '@/types/content';
 import { subjects, getSubject } from '@/data/subjects';
 import { mulberry32, seedFromString } from '@/utils/random';
@@ -160,57 +158,12 @@ function questionsFromLesson(lesson: GeneratedLesson, dayKey: string): Challenge
   return [];
 }
 
-async function generateAiQuestions(
-  config: AiConfig,
-  subjectTitle: string,
-  topic: string,
-  dayKey: string,
-): Promise<ChallengeQuestion[] | null> {
-  try {
-    const raw = await requestJsonCompletion(
-      config,
-      'You write short multiple-choice quiz questions as JSON. Return {"questions":[{"question":"...","options":["A","B","C","D"],"answerIndex":0,"explanation":"..."}]} with exactly 5 questions.',
-      `Subject: ${subjectTitle}\nTopic: ${topic}\nDay: ${dayKey}\nWrite 5 concise multiple-choice questions. answerIndex is 0-based.`,
-      1800,
-    );
-    const parsed = JSON.parse(raw) as {
-      questions?: Array<{
-        question?: string;
-        options?: string[];
-        answerIndex?: number;
-        explanation?: string;
-      }>;
-    };
-    if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) return null;
-    const questions: ChallengeQuestion[] = [];
-    for (let i = 0; i < parsed.questions.length && questions.length < CHALLENGE_QUESTION_COUNT; i++) {
-      const q = parsed.questions[i];
-      if (!q?.question || !Array.isArray(q.options) || q.options.length < 2) continue;
-      const answerIndex =
-        typeof q.answerIndex === 'number' && q.answerIndex >= 0 && q.answerIndex < q.options.length
-          ? q.answerIndex
-          : 0;
-      questions.push({
-        id: `ai-${dayKey}-${i}`,
-        question: q.question,
-        options: q.options.filter((o): o is string => typeof o === 'string'),
-        answerIndex,
-        explanation: q.explanation ?? 'Good effort — review the topic to reinforce this.',
-      });
-    }
-    return questions.length >= 3 ? questions : null;
-  } catch {
-    return null;
-  }
-}
 
 export async function getTodayChallenge(input: {
   dayKey: string;
   generatedLessons: GeneratedLesson[];
-  config?: AiConfig;
-  hasKey: boolean;
 }): Promise<DailyChallenge> {
-  const { dayKey, generatedLessons, config, hasKey } = input;
+  const { dayKey, generatedLessons } = input;
 
   try {
     const raw = await AsyncStorage.getItem(CACHE_KEY);
@@ -233,14 +186,6 @@ export async function getTodayChallenge(input: {
   if (fromLesson) {
     questions = questionsFromLesson(fromLesson, dayKey);
     if (questions.length >= 3) source = 'lesson';
-  }
-
-  if (questions.length < 3 && hasKey && config?.apiKey) {
-    const ai = await generateAiQuestions(config, subject.title, topic, dayKey);
-    if (ai && ai.length >= 3) {
-      questions = ai;
-      source = 'ai';
-    }
   }
 
   if (questions.length < 3) {

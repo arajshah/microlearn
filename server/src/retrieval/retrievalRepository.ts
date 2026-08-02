@@ -15,6 +15,7 @@ import {
 } from './retrievalSerialization';
 import type { RetrievalItemRow, RetrievalRating, ReviewSetRow, ScheduleState } from './retrievalTypes';
 import { buildReviewSetCandidates } from './reviewSetBuilder';
+import { assertLessonCompleted } from './lessonCompletion';
 
 function now(): string {
   return new Date().toISOString();
@@ -179,104 +180,179 @@ export function createReviewSetFromLesson(
     actor?: string;
   },
 ) {
-  const generated = input.lesson ? null : getGeneratedLesson(db, input.lessonId);
-  const lessonObj = input.lesson ?? (generated?.lesson as Record<string, unknown>);
-  const roadmapId = input.roadmapId ?? generated?.roadmapId;
-  const lessonNodeId = input.lessonNodeId ?? generated?.lessonNodeId;
+  const generated = getGeneratedLesson(db, input.lessonId);
+  const lessonObj = generated.lesson as Record<string, unknown>;
+  const roadmapId = input.roadmapId ?? generated.roadmapId;
+  const lessonNodeId = input.lessonNodeId ?? generated.lessonNodeId;
+  const completionEvidence = assertLessonCompleted(db, {
+    lessonId: input.lessonId,
+    roadmapId,
+    lessonNodeId,
+  });
   const { title, strategy, candidates } = buildReviewSetCandidates(input.lessonId, lessonObj);
-
-  const existingSet = db
-    .prepare("SELECT * FROM review_sets WHERE lesson_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1")
-    .get(input.lessonId) as ReviewSetRow | undefined;
-
-  if (existingSet && !input.force) {
-    const items = getReviewSetItems(db, existingSet.id);
-    return {
-      reviewSet: serializeReviewSetWithCount(db, existingSet.id),
-      items,
-      created: 0,
-      existing: items.length,
-      totalCandidates: candidates.length,
-    };
-  }
-
-  if (candidates.length === 0) {
-    return {
-      reviewSet: null,
-      items: [] as SerializedRetrievalItem[],
-      created: 0,
-      existing: 0,
-      totalCandidates: 0,
-    };
-  }
 
   const tx = db.transaction(() => {
     const ts = now();
-    if (existingSet && input.force) {
-      db.prepare("UPDATE review_sets SET status = 'deleted', updated_at = ? WHERE id = ?").run(ts, existingSet.id);
-      db.prepare("UPDATE retrieval_items SET status = 'deleted', updated_at = ? WHERE review_set_id = ?").run(
-        ts,
-        existingSet.id,
-      );
+    let existingSet = db
+      .prepare(
+        "SELECT * FROM review_sets WHERE lesson_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+      )
+      .get(input.lessonId) as ReviewSetRow | undefined;
+
+    if (input.force) {
+      db.prepare(
+        `UPDATE retrieval_items SET status = 'deleted', updated_at = ?
+         WHERE lesson_id = ? AND status != 'deleted'`,
+      ).run(ts, input.lessonId);
+      db.prepare(
+        "UPDATE review_sets SET status = 'deleted', updated_at = ? WHERE lesson_id = ? AND status = 'active'",
+      ).run(ts, input.lessonId);
+      existingSet = undefined;
+    }
+
+    if (candidates.length === 0) {
+      return {
+        reviewSet: existingSet ? serializeReviewSetWithCount(db, existingSet.id) : null,
+        items: existingSet ? getReviewSetItems(db, existingSet.id) : [],
+        created: 0,
+        existing: 0,
+        totalCandidates: 0,
+      };
     }
 
     const schedule = initialSchedule(new Date(), false);
-    const reviewSetId = randomUUID();
-    db.prepare(
-      `INSERT INTO review_sets
-        (id, lesson_id, roadmap_id, lesson_node_id, title, strategy, status, due_at, created_at, updated_at, metadata_json)
-       VALUES (@id, @lessonId, @roadmapId, @lessonNodeId, @title, @strategy, 'active', @dueAt, @ts, @ts, @metadata)`,
-    ).run({
-      id: reviewSetId,
-      lessonId: input.lessonId,
-      roadmapId: roadmapId ?? null,
-      lessonNodeId: lessonNodeId ?? null,
-      title,
-      strategy,
-      dueAt: schedule.dueAt,
-      ts,
-      metadata: JSON.stringify({ itemTarget: candidates.length }),
-    });
+    let reviewSetId = existingSet?.id;
+    if (!reviewSetId) {
+      reviewSetId = randomUUID();
+      try {
+        db.prepare(
+          `INSERT INTO review_sets
+            (id, lesson_id, roadmap_id, lesson_node_id, title, strategy, status, due_at, created_at, updated_at, metadata_json)
+           VALUES (@id, @lessonId, @roadmapId, @lessonNodeId, @title, @strategy, 'active', @dueAt, @ts, @ts, @metadata)`,
+        ).run({
+          id: reviewSetId,
+          lessonId: input.lessonId,
+          roadmapId: roadmapId ?? null,
+          lessonNodeId: lessonNodeId ?? null,
+          title,
+          strategy,
+          dueAt: schedule.dueAt,
+          ts,
+          metadata: JSON.stringify({ itemTarget: candidates.length, completionEvidence }),
+        });
+      } catch (error) {
+        const concurrent = db
+          .prepare(
+            "SELECT * FROM review_sets WHERE lesson_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+          )
+          .get(input.lessonId) as ReviewSetRow | undefined;
+        if (!concurrent) throw error;
+        reviewSetId = concurrent.id;
+      }
+    }
+
+    let created = 0;
+    let existing = 0;
 
     for (const candidate of candidates) {
-      const id = randomUUID();
-      db.prepare(
-        `INSERT INTO retrieval_items
-          (id, review_set_id, roadmap_id, lesson_node_id, lesson_id, source_type, source_ref, item_type, prompt, answer, explanation, concept, difficulty, status, due_at, last_reviewed_at, reps, lapses, ease, interval_days, choices_json, metadata_json, created_at, updated_at)
-         VALUES (@id, @reviewSetId, @roadmapId, @lessonNodeId, @lessonId, 'review_set', @sourceRef, @itemType, @prompt, @answer, @explanation, @concept, @difficulty, 'active', @dueAt, NULL, 0, 0, 2.5, 0, @choices, @metadata, @ts, @ts)`,
-      ).run({
-        id,
-        reviewSetId,
-        roadmapId: roadmapId ?? null,
-        lessonNodeId: lessonNodeId ?? null,
-        lessonId: input.lessonId,
-        sourceRef: candidate.sourceRef,
-        itemType: candidate.itemType,
-        prompt: candidate.prompt,
-        answer: candidate.answer ?? null,
-        explanation: candidate.explanation ?? null,
-        concept: candidate.concept ?? null,
-        difficulty: candidate.difficulty ?? null,
-        dueAt: schedule.dueAt,
-        choices: candidate.choices ? JSON.stringify(candidate.choices) : null,
-        metadata: JSON.stringify(candidate.metadata ?? {}),
-        ts,
-      });
+      const compatible = db
+        .prepare(
+          `SELECT retrieval_items.* FROM retrieval_items
+           LEFT JOIN review_sets ON review_sets.id = retrieval_items.review_set_id
+           WHERE retrieval_items.lesson_id = ?
+             AND retrieval_items.status != 'deleted'
+             AND (retrieval_items.source_ref = ? OR retrieval_items.prompt = ?)
+           ORDER BY CASE WHEN retrieval_items.source_ref = ? THEN 0 ELSE 1 END,
+                    retrieval_items.created_at ASC
+           LIMIT 1`,
+        )
+        .get(input.lessonId, candidate.sourceRef, candidate.prompt, candidate.sourceRef) as
+        | RetrievalItemRow
+        | undefined;
+
+      if (compatible) {
+        db.prepare(
+          `UPDATE retrieval_items SET review_set_id = ?, roadmap_id = ?, lesson_node_id = ?,
+             updated_at = ? WHERE id = ?`,
+        ).run(reviewSetId, roadmapId ?? null, lessonNodeId ?? null, ts, compatible.id);
+        existing += 1;
+        continue;
+      }
+
+      try {
+        db.prepare(
+          `INSERT INTO retrieval_items
+            (id, review_set_id, roadmap_id, lesson_node_id, lesson_id, source_type, source_ref, item_type, prompt, answer, explanation, concept, difficulty, status, due_at, last_reviewed_at, reps, lapses, ease, interval_days, choices_json, metadata_json, created_at, updated_at)
+           VALUES (@id, @reviewSetId, @roadmapId, @lessonNodeId, @lessonId, 'review_set', @sourceRef, @itemType, @prompt, @answer, @explanation, @concept, @difficulty, 'active', @dueAt, NULL, 0, 0, 2.5, 0, @choices, @metadata, @ts, @ts)`,
+        ).run({
+          id: randomUUID(),
+          reviewSetId,
+          roadmapId: roadmapId ?? null,
+          lessonNodeId: lessonNodeId ?? null,
+          lessonId: input.lessonId,
+          sourceRef: candidate.sourceRef,
+          itemType: candidate.itemType,
+          prompt: candidate.prompt,
+          answer: candidate.answer ?? null,
+          explanation: candidate.explanation ?? null,
+          concept: candidate.concept ?? null,
+          difficulty: candidate.difficulty ?? null,
+          dueAt: schedule.dueAt,
+          choices: candidate.choices ? JSON.stringify(candidate.choices) : null,
+          metadata: JSON.stringify(candidate.metadata ?? {}),
+          ts,
+        });
+        created += 1;
+      } catch (error) {
+        const concurrent = db
+          .prepare(
+            "SELECT id FROM retrieval_items WHERE lesson_id = ? AND source_ref = ? AND status != 'deleted'",
+          )
+          .get(input.lessonId, candidate.sourceRef) as { id: string } | undefined;
+        if (!concurrent) throw error;
+        db.prepare('UPDATE retrieval_items SET review_set_id = ?, updated_at = ? WHERE id = ?').run(
+          reviewSetId,
+          ts,
+          concurrent.id,
+        );
+        existing += 1;
+      }
     }
+
+    db.prepare(
+      `UPDATE review_sets SET title = ?, strategy = ?, roadmap_id = ?, lesson_node_id = ?,
+         metadata_json = ?, updated_at = ? WHERE id = ?`,
+    ).run(
+      title,
+      strategy,
+      roadmapId ?? null,
+      lessonNodeId ?? null,
+      JSON.stringify({ itemTarget: candidates.length, completionEvidence }),
+      ts,
+      reviewSetId,
+    );
 
     recordAuditEvent(db, {
       actor: input.actor ?? 'api',
       action: 'create_review_set',
       entityType: 'review_set',
       entityId: reviewSetId,
-      metadata: { lessonId: input.lessonId, created: candidates.length, roadmapId, lessonNodeId, strategy },
+      metadata: {
+        lessonId: input.lessonId,
+        created,
+        existing,
+        roadmapId,
+        lessonNodeId,
+        strategy,
+        completionEvidence,
+      },
     });
 
     return {
       reviewSet: serializeReviewSetWithCount(db, reviewSetId),
       items: getReviewSetItems(db, reviewSetId),
-      created: candidates.length,
-      existing: 0,
+      created,
+      existing,
       totalCandidates: candidates.length,
     };
   });
@@ -295,10 +371,15 @@ export function seedRetrievalItems(
     actor?: string;
   },
 ) {
-  const generated = input.lesson ? null : getGeneratedLesson(db, input.lessonId);
-  const lessonObj = input.lesson ?? (generated?.lesson as Record<string, unknown>);
-  const roadmapId = input.roadmapId ?? generated?.roadmapId;
-  const lessonNodeId = input.lessonNodeId ?? generated?.lessonNodeId;
+  const generated = getGeneratedLesson(db, input.lessonId);
+  const lessonObj = generated.lesson as Record<string, unknown>;
+  const roadmapId = input.roadmapId ?? generated.roadmapId;
+  const lessonNodeId = input.lessonNodeId ?? generated.lessonNodeId;
+  const completionEvidence = assertLessonCompleted(db, {
+    lessonId: input.lessonId,
+    roadmapId,
+    lessonNodeId,
+  });
   const candidates = mapLessonCardsToSeedCandidates(input.lessonId, lessonObj);
 
   if (candidates.length === 0) {
@@ -314,8 +395,15 @@ export function seedRetrievalItems(
 
     for (const candidate of candidates) {
       const existingRow = db
-        .prepare('SELECT * FROM retrieval_items WHERE lesson_id = ? AND source_ref = ? AND status != ?')
-        .get(input.lessonId, candidate.sourceRef, 'deleted') as RetrievalItemRow | undefined;
+        .prepare(
+          `SELECT * FROM retrieval_items
+           WHERE lesson_id = ? AND status != 'deleted' AND (source_ref = ? OR prompt = ?)
+           ORDER BY CASE WHEN source_ref = ? THEN 0 ELSE 1 END, created_at ASC
+           LIMIT 1`,
+        )
+        .get(input.lessonId, candidate.sourceRef, candidate.prompt, candidate.sourceRef) as
+        | RetrievalItemRow
+        | undefined;
 
       if (existingRow && !input.force) {
         existing += 1;
@@ -361,7 +449,14 @@ export function seedRetrievalItems(
         action: 'seed_retrieval_items',
         entityType: 'retrieval_item',
         entityId: input.lessonId,
-        metadata: { lessonId: input.lessonId, created, existing, roadmapId, lessonNodeId },
+        metadata: {
+          lessonId: input.lessonId,
+          created,
+          existing,
+          roadmapId,
+          lessonNodeId,
+          completionEvidence,
+        },
       });
     }
 
