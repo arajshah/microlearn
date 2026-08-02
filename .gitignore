@@ -55,3 +55,4 @@ server/uploads/
 # generated native folders
 /ios
 /android
+.env.backup

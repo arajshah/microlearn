@@ -1,5 +1,6 @@
 import type { Db } from '../db';
 import { ApiError, badRequest } from '../api/apiError';
+import { resolveRoadmapNodeId } from '../roadmaps/nodeIdResolver';
 
 export const LESSON_NOT_COMPLETED_MESSAGE =
   'Complete this lesson before adding it to review.';
@@ -31,7 +32,12 @@ function resolveLessonLink(db: Db, input: CompletionInput): LessonLinkRow | unde
   if (input.roadmapId && lesson.roadmap_id !== input.roadmapId) {
     throw badRequest('The lesson does not belong to the supplied roadmap.', 'LESSON_CONTEXT_MISMATCH');
   }
-  if (input.lessonNodeId && lesson.lesson_node_id !== input.lessonNodeId) {
+  if (input.lessonNodeId && lesson.roadmap_id) {
+    const canonical = resolveRoadmapNodeId(db, lesson.roadmap_id, input.lessonNodeId);
+    if (canonical && lesson.lesson_node_id !== canonical && lesson.lesson_node_id !== input.lessonNodeId) {
+      throw badRequest('The lesson does not belong to the supplied lesson node.', 'LESSON_CONTEXT_MISMATCH');
+    }
+  } else if (input.lessonNodeId && lesson.lesson_node_id !== input.lessonNodeId) {
     throw badRequest('The lesson does not belong to the supplied lesson node.', 'LESSON_CONTEXT_MISMATCH');
   }
   return lesson;
@@ -44,7 +50,11 @@ export function findLessonCompletionEvidence(
 ): LessonCompletionEvidence | null {
   const link = resolveLessonLink(db, input);
   const roadmapId = link?.roadmap_id ?? input.roadmapId;
-  const lessonNodeId = link?.lesson_node_id ?? input.lessonNodeId;
+  const requestedNodeId = link?.lesson_node_id ?? input.lessonNodeId;
+  const lessonNodeId =
+    roadmapId && requestedNodeId
+      ? resolveRoadmapNodeId(db, roadmapId, requestedNodeId) ?? requestedNodeId
+      : requestedNodeId;
 
   if (roadmapId && lessonNodeId) {
     const completedNode = db

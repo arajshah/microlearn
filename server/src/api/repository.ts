@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db';
 import { notFound, badRequest } from './apiError';
+import { resolveRoadmapNodeId } from '../roadmaps/nodeIdResolver';
 import {
   serializeGeneratedLesson,
   serializeRoadmap,
@@ -256,13 +257,16 @@ export function patchLessonNode(
     if (!roadmap) throw notFound(`Roadmap "${roadmapId}" not found.`);
     if (roadmap.status === 'deleted') throw notFound(`Roadmap "${roadmapId}" was deleted.`);
 
+    const canonicalNodeId = resolveRoadmapNodeId(db, roadmapId, nodeId);
+    if (!canonicalNodeId) throw notFound(`Lesson node "${nodeId}" not found in roadmap.`);
+
     const node = db
       .prepare('SELECT * FROM lesson_nodes WHERE id = ? AND roadmap_id = ?')
-      .get(nodeId, roadmapId) as LessonNodeRow | undefined;
+      .get(canonicalNodeId, roadmapId) as LessonNodeRow | undefined;
     if (!node) throw notFound(`Lesson node "${nodeId}" not found in roadmap.`);
 
     const sets: string[] = [];
-    const params: Record<string, unknown> = { nodeId, roadmapId };
+    const params: Record<string, unknown> = { nodeId: canonicalNodeId, roadmapId };
     for (const [key, column] of Object.entries(NODE_PATCH_COLUMNS)) {
       const value = (patch as Record<string, unknown>)[key];
       if (value !== undefined) {
@@ -308,11 +312,16 @@ export function upsertGeneratedLesson(db: Db, input: LessonUpsertInput) {
     if (isRoadmapLinked) {
       const roadmap = loadRoadmapRow(db, input.roadmapId!);
       if (!roadmap) throw notFound(`Roadmap "${input.roadmapId}" not found.`);
+      const canonicalNodeId = resolveRoadmapNodeId(db, input.roadmapId!, input.lessonNodeId!);
+      if (!canonicalNodeId) {
+        throw notFound(`Lesson node "${input.lessonNodeId}" not found in roadmap.`);
+      }
       node = db.prepare('SELECT * FROM lesson_nodes WHERE id = ? AND roadmap_id = ?').get(
-        input.lessonNodeId!,
+        canonicalNodeId,
         input.roadmapId!,
       ) as LessonNodeRow | undefined;
       if (!node) throw notFound(`Lesson node "${input.lessonNodeId}" not found in roadmap.`);
+      input = { ...input, lessonNodeId: canonicalNodeId };
     }
 
     const existing = input.id

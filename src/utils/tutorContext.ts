@@ -1,6 +1,8 @@
 import { LessonCard } from '@/types/content';
 
-export function cardToTutorContext(card: LessonCard): string {
+export function cardToTutorContext(card: LessonCard | null | undefined): string {
+  if (!card || typeof card.type !== 'string') return '';
+
   switch (card.type) {
     case 'concept':
       return `${card.title}\n${card.body}${

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db';
 import { notFound } from '../api/apiError';
+import { resolveRoadmapNodeId } from '../roadmaps/nodeIdResolver';
 import { recordAuditEvent } from '../audit/auditService';
 import { serializeOutcome, type OutcomeRow } from '../curriculum/curriculumSerialization';
 
@@ -16,16 +17,11 @@ function loadRoadmap(db: Db, id: string): boolean {
   return Boolean(db.prepare('SELECT 1 FROM roadmaps WHERE id = ?').get(id));
 }
 
-function loadNode(db: Db, roadmapId: string, nodeId: string): boolean {
-  return Boolean(
-    db.prepare('SELECT 1 FROM lesson_nodes WHERE id = ? AND roadmap_id = ?').get(nodeId, roadmapId),
-  );
-}
-
 /** Stores a lesson outcome and an optional progress event. */
 export function createOutcome(db: Db, input: CreateOutcomeInput) {
   if (!loadRoadmap(db, input.roadmapId)) throw notFound(`Roadmap "${input.roadmapId}" not found.`);
-  if (!loadNode(db, input.roadmapId, input.lessonNodeId)) {
+  const canonicalNodeId = resolveRoadmapNodeId(db, input.roadmapId, input.lessonNodeId);
+  if (!canonicalNodeId) {
     throw notFound(`Lesson node "${input.lessonNodeId}" not found in roadmap.`);
   }
 
@@ -41,7 +37,7 @@ export function createOutcome(db: Db, input: CreateOutcomeInput) {
     ).run({
       id,
       roadmapId: input.roadmapId,
-      lessonNodeId: input.lessonNodeId,
+      lessonNodeId: canonicalNodeId,
       lessonId: input.lessonId,
       outcomeJson: JSON.stringify(input.outcome),
       completedAt,
@@ -55,7 +51,7 @@ export function createOutcome(db: Db, input: CreateOutcomeInput) {
     ).run({
       id: randomUUID(),
       roadmapId: input.roadmapId,
-      lessonNodeId: input.lessonNodeId,
+      lessonNodeId: canonicalNodeId,
       lessonId: input.lessonId,
       eventJson: JSON.stringify({ outcomeId: id, completedAt }),
       createdAt: ts,
@@ -69,7 +65,7 @@ export function createOutcome(db: Db, input: CreateOutcomeInput) {
       entityType: 'lesson_outcome',
       entityId: id,
       after: outcome,
-      metadata: { roadmapId: input.roadmapId, lessonNodeId: input.lessonNodeId, lessonId: input.lessonId },
+      metadata: { roadmapId: input.roadmapId, lessonNodeId: canonicalNodeId, lessonId: input.lessonId },
     });
     return outcome;
   });

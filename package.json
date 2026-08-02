@@ -18,6 +18,8 @@
     "verify:review-integrity": "tsx scripts/verify-review-integrity.ts",
     "verify:server-generation": "tsx scripts/verify-server-generation.ts",
     "verify:generation-quality": "tsx scripts/verify-generation-quality.ts",
+    "verify:lesson-lifecycle": "tsx scripts/verify-lesson-lifecycle.ts",
+    "verify:roadmap-id-integrity": "tsx scripts/verify-roadmap-id-integrity.ts",
     "repair:review-integrity": "tsx scripts/repair-review-integrity.ts",
     "reset:learning": "tsx scripts/reset-learning-data.ts learning",
     "reset:all-data": "tsx scripts/reset-learning-data.ts all",
@@ -30,7 +32,6 @@
     "server:tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
-    "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.1.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -59,7 +60,6 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-svg": "^15.12.1",
-    "react-native-web": "^0.21.0",
     "react-native-worklets": "^0.5.1",
     "zod": "^4.4.3"
   },

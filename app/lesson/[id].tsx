@@ -25,6 +25,7 @@ import { useReview } from '@/context/ReviewContext';
 import { useBookmarks } from '@/context/BookmarksContext';
 import { makeItemId } from '@/srs/scheduler';
 import { cardToTutorContext } from '@/utils/tutorContext';
+import { clampCardIndex, getLessonCardAtIndex } from '@/utils/lessonPlayerState';
 import { createReviewSetFromLesson, isServerConfigured } from '@/services/microlearnServer';
 import {
   LessonTelemetryContext,
@@ -74,10 +75,36 @@ export default function LessonPlayer() {
   >('idle');
   const [scheduleMessage, setScheduleMessage] = useState<string | null>(null);
   const scheduleRequestInFlight = useRef(false);
+  const finishInFlight = useRef(false);
 
   const fade = useRef(new Animated.Value(1)).current;
   const generatedLesson = useMemo(() => getGenerated(id ?? ''), [id, getGenerated]);
   const cardShownAt = useRef<number>(Date.now());
+  const lessonId = location?.lesson.id;
+  const cards = location?.lesson.cards ?? [];
+  const cardCount = cards.length;
+  const safeIndex = clampCardIndex(index, cardCount);
+  const card = getLessonCardAtIndex(cards, safeIndex);
+
+  useEffect(() => {
+    setIndex((current) => clampCardIndex(current, cardCount));
+    setSelected(null);
+    setRevealed(false);
+  }, [lessonId, cardCount]);
+
+  useEffect(() => {
+    if (safeIndex !== index) {
+      setIndex(safeIndex);
+    }
+  }, [safeIndex, index]);
+
+  useEffect(() => {
+    return () => {
+      stop();
+      setTutorOpen(false);
+      setTutorKeyboardUp(false);
+    };
+  }, [stop]);
 
   const telemetry = useMemo<LessonTelemetryContext | null>(() => {
     if (!location) return null;
@@ -106,19 +133,18 @@ export default function LessonPlayer() {
   }, [telemetry?.lessonId]);
 
   useEffect(() => {
-    if (!telemetry || !location) return;
-    const current = location.lesson.cards[index];
-    if (!current) return;
+    if (!telemetry || !card) return;
     cardShownAt.current = Date.now();
-    trackCardViewed(telemetry, current, index);
+    trackCardViewed(telemetry, card, safeIndex);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [telemetry?.lessonId, index]);
+  }, [telemetry?.lessonId, safeIndex, card?.id]);
 
   const tutorContext = useMemo(() => {
-    if (!location) return undefined;
+    if (!location || !card) return undefined;
     const header = `${location.subject.title} — ${location.lesson.title}`;
-    return `${header}\n${cardToTutorContext(location.lesson.cards[index])}`;
-  }, [location, index]);
+    const body = cardToTutorContext(card);
+    return body ? `${header}\n${body}` : header;
+  }, [location, card]);
 
   if (!location) {
     return (
@@ -132,11 +158,77 @@ export default function LessonPlayer() {
   }
 
   const { subject, lesson } = location;
-  const cards = lesson.cards;
-  const card = cards[index];
   const totalQuestions = countGradedCards(cards);
-  const isQuestion = isInteractiveCard(card);
-  const progress = (index + (revealed || !isQuestion ? 1 : 0)) / cards.length;
+  const isQuestion = card ? isInteractiveCard(card) : false;
+  const progress = cardCount > 0 ? (safeIndex + (revealed || !isQuestion ? 1 : 0)) / cardCount : 1;
+
+  const closeLesson = () => {
+    stop();
+    setTutorOpen(false);
+    setTutorKeyboardUp(false);
+    router.back();
+  };
+
+  const finish = async () => {
+    if (finishInFlight.current || finished) return;
+    finishInFlight.current = true;
+    try {
+      ingestLesson(
+        lesson,
+        subject.id,
+        results.current.map(({ cardIndex, correct }) => ({ cardIndex, correct })),
+      );
+      const xp = await completeLesson({
+        lesson,
+        subjectId: subject.id,
+        correct: correctCount,
+        total: totalQuestions,
+      });
+      const lessonMeta = lesson as unknown as Record<string, unknown>;
+      const lessonRoadmapId = typeof lessonMeta.roadmapId === 'string' ? lessonMeta.roadmapId : undefined;
+      const lessonNodeId = typeof lessonMeta.roadmapNodeId === 'string' ? lessonMeta.roadmapNodeId : undefined;
+      const gen = generatedLesson ?? (lessonRoadmapId && lessonNodeId
+        ? (lesson as unknown as GeneratedLesson)
+        : undefined);
+      const rmId = firstParam(roadmapId) ?? gen?.roadmapId ?? lessonRoadmapId;
+      const nId = firstParam(nodeId) ?? gen?.roadmapNodeId ?? lessonNodeId;
+      if (rmId && nId && gen) {
+        const roadmap = getRoadmapById(rmId);
+        const objective =
+          gen.primaryObjective ??
+          (roadmap ? getNodeObjective(roadmap, nId) : undefined) ??
+          lesson.title;
+        const outcome = buildLessonOutcome({
+          roadmapId: rmId,
+          roadmapNodeId: nId,
+          lesson: gen,
+          objective,
+          results: results.current,
+        });
+        await saveLessonOutcome(outcome);
+        await onRoadmapLessonCompleted(rmId, nId, outcome);
+      } else if (rmId && nId) {
+        await onRoadmapLessonCompleted(rmId, nId);
+      }
+      if (telemetry) {
+        await trackLessonCompleted(telemetry, {
+          correctCount,
+          totalCount: totalQuestions,
+          accuracy: totalQuestions > 0 ? Number((correctCount / totalQuestions).toFixed(4)) : 0,
+        });
+      }
+      setEarnedXp(xp);
+      setFinished(true);
+      stop();
+      setTutorOpen(false);
+      setTutorKeyboardUp(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => {},
+      );
+    } finally {
+      finishInFlight.current = false;
+    }
+  };
 
   const animateTo = (next: () => void) => {
     Animated.timing(fade, {
@@ -154,12 +246,12 @@ export default function LessonPlayer() {
   };
 
   const handleSelect = (optionIndex: number, isCorrect: boolean) => {
-    if (revealed) return;
+    if (revealed || !card) return;
     setSelected(optionIndex);
     setRevealed(true);
     results.current.push({
-      cardIndex: index,
-      cardId: card.id ?? `c${index + 1}`,
+      cardIndex: safeIndex,
+      cardId: card.id ?? `c${safeIndex + 1}`,
       correct: isCorrect,
       selected: optionIndex,
     });
@@ -183,82 +275,34 @@ export default function LessonPlayer() {
     }
   };
 
-  const finish = async () => {
-    ingestLesson(
-      lesson,
-      subject.id,
-      results.current.map(({ cardIndex, correct }) => ({ cardIndex, correct })),
-    );
-    const xp = await completeLesson({
-      lesson,
-      subjectId: subject.id,
-      correct: correctCount,
-      total: totalQuestions,
-    });
-    const lessonMeta = lesson as unknown as Record<string, unknown>;
-    const lessonRoadmapId = typeof lessonMeta.roadmapId === 'string' ? lessonMeta.roadmapId : undefined;
-    const lessonNodeId = typeof lessonMeta.roadmapNodeId === 'string' ? lessonMeta.roadmapNodeId : undefined;
-    const gen = generatedLesson ?? (lessonRoadmapId && lessonNodeId
-      ? (lesson as unknown as GeneratedLesson)
-      : undefined);
-    const rmId = firstParam(roadmapId) ?? gen?.roadmapId ?? lessonRoadmapId;
-    const nId = firstParam(nodeId) ?? gen?.roadmapNodeId ?? lessonNodeId;
-    if (rmId && nId && gen) {
-      const roadmap = getRoadmapById(rmId);
-      const objective =
-        gen.primaryObjective ??
-        (roadmap ? getNodeObjective(roadmap, nId) : undefined) ??
-        lesson.title;
-      const outcome = buildLessonOutcome({
-        roadmapId: rmId,
-        roadmapNodeId: nId,
-        lesson: gen,
-        objective,
-        results: results.current,
-      });
-      await saveLessonOutcome(outcome);
-      await onRoadmapLessonCompleted(rmId, nId, outcome);
-    } else if (rmId && nId) {
-      await onRoadmapLessonCompleted(rmId, nId);
-    }
-    if (telemetry) {
-      await trackLessonCompleted(telemetry, {
-        correctCount,
-        totalCount: totalQuestions,
-        accuracy: totalQuestions > 0 ? Number((correctCount / totalQuestions).toFixed(4)) : 0,
-      });
-    }
-    setEarnedXp(xp);
-    setFinished(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-      () => {},
-    );
-  };
-
   const advance = () => {
-    if (index >= cards.length - 1) {
-      finish();
+    if (cardCount === 0) {
+      void finish();
+      return;
+    }
+    if (safeIndex >= cardCount - 1) {
+      void finish();
       return;
     }
     animateTo(() => {
-      setIndex((i) => i + 1);
+      setIndex((i) => clampCardIndex(i + 1, cardCount));
       setSelected(null);
       setRevealed(false);
     });
   };
 
   const goBack = () => {
-    if (index <= 0) return;
+    if (safeIndex <= 0) return;
     animateTo(() => {
-      setIndex((i) => i - 1);
+      setIndex((i) => clampCardIndex(i - 1, cardCount));
       setSelected(null);
       setRevealed(false);
     });
   };
 
-  const canContinue = !isQuestion || revealed;
-  const canGoBack = index > 0;
-  const isLastSlide = index >= cards.length - 1;
+  const canContinue = cardCount === 0 || !isQuestion || revealed;
+  const canGoBack = safeIndex > 0;
+  const isLastSlide = cardCount === 0 || safeIndex >= cardCount - 1;
   const completionRoadmapId = firstParam(roadmapId) ?? generatedLesson?.roadmapId;
   const completionNodeId = firstParam(nodeId) ?? generatedLesson?.roadmapNodeId;
   const isRoadmapGeneratedLesson = Boolean(completionRoadmapId && completionNodeId);
@@ -324,11 +368,39 @@ export default function LessonPlayer() {
     );
   }
 
+  if (cardCount === 0) {
+    return (
+      <View style={[styles.screen, styles.center, { padding: spacing.xl }]}>
+        <Text style={styles.missing}>This lesson has no cards yet.</Text>
+        <Pressable onPress={closeLesson} style={styles.linkBtn}>
+          <Text style={styles.linkBtnText}>Go back</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => void finish()}
+          style={[styles.linkBtn, { marginTop: spacing.sm }]}
+        >
+          <Text style={styles.linkBtnText}>Mark complete</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (!card) {
+    return (
+      <View style={[styles.screen, styles.center, { padding: spacing.xl }]}>
+        <Text style={styles.missing}>This card is no longer available.</Text>
+        <Pressable onPress={closeLesson} style={styles.linkBtn}>
+          <Text style={styles.linkBtnText}>Go back</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
       {/* Top bar */}
       <View style={styles.topBar}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.closeBtn}>
+        <Pressable onPress={closeLesson} hitSlop={12} style={styles.closeBtn}>
           <Ionicons name="close" size={24} color={colors.textMuted} />
         </Pressable>
         <View style={styles.progressTrack}>
@@ -340,7 +412,7 @@ export default function LessonPlayer() {
           />
         </View>
         <Text style={styles.counter}>
-          {index + 1} of {cards.length}
+          {safeIndex + 1} of {cardCount}
         </Text>
         <Pressable
           onPress={() => (speaking ? stop() : speak(cardToSpeech(card)))}
@@ -356,11 +428,11 @@ export default function LessonPlayer() {
         <Pressable
           onPress={() =>
             toggle({
-              id: makeItemId(lesson.id, index),
+              id: makeItemId(lesson.id, safeIndex),
               lessonId: lesson.id,
               lessonTitle: lesson.title,
               subjectId: subject.id,
-              cardIndex: index,
+              cardIndex: safeIndex,
               card,
             })
           }
@@ -368,9 +440,9 @@ export default function LessonPlayer() {
           style={styles.askBtn}
         >
           <Ionicons
-            name={isSaved(makeItemId(lesson.id, index)) ? 'bookmark' : 'bookmark-outline'}
+            name={isSaved(makeItemId(lesson.id, safeIndex)) ? 'bookmark' : 'bookmark-outline'}
             size={18}
-            color={isSaved(makeItemId(lesson.id, index)) ? colors.xp : colors.textMuted}
+            color={isSaved(makeItemId(lesson.id, safeIndex)) ? colors.xp : colors.textMuted}
           />
         </Pressable>
         <Pressable
@@ -405,9 +477,9 @@ export default function LessonPlayer() {
           </ScrollView>
         </Animated.View>
 
-        {tutorOpen ? (
+        {tutorOpen && tutorContext ? (
           <TutorPanel
-            key={`${lesson.id}-${index}`}
+            key={`${lesson.id}-${safeIndex}`}
             context={tutorContext}
             contextLabel={lesson.title}
             accent={subject.accent}
@@ -438,7 +510,7 @@ export default function LessonPlayer() {
             <View style={styles.navBtnPlaceholder} />
           )}
           <Pressable
-            disabled={!canContinue}
+            disabled={!canContinue || finishInFlight.current}
             onPress={advance}
             style={[
               styles.navBtn,

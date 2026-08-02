@@ -22,6 +22,7 @@ import {
   isBackendTruthMigrated,
   markBackendTruthMigrated,
   mergeLessonsByUpdatedAt,
+  mergeRoadmapPreservingLocalProgress,
   mergeRoadmapSummary,
   readLessonsCache,
   readRoadmapsCache,
@@ -38,7 +39,11 @@ import {
   removePendingMutation,
 } from '@/storage/pendingMutations';
 import { normalizeGeneratedLesson, normalizeGeneratedLessons } from '@/utils/normalizeLesson';
-import { normalizeRoadmapEntityIds, normalizeRoadmapEntityIdsList } from '@/utils/roadmapIds';
+import {
+  normalizeLocalRoadmapEntityIds,
+  repairRoadmapMutationPayload,
+  resolveRoadmapNodeId,
+} from '@/utils/roadmapIds';
 import { filterDemoRoadmaps } from '@/storage/cleanupLegacyData';
 
 const LEGACY_LESSONS_KEY = 'microlearn.ai.lessons.v1';
@@ -91,9 +96,9 @@ export async function loadRoadmapsFromCache(
   const cache = await readRoadmapsCache();
   const pendingDeletes = pendingDeletedRoadmapIds(pending);
   const deletedIds = deletedIdsFromCache(cache?.deletedIds ?? [], pendingDeletes);
-  const roadmaps = normalizeRoadmapEntityIdsList(
-    filterDemoRoadmaps((cache?.roadmaps ?? []).filter((r) => !deletedIds.has(r.id))),
-  ).map((roadmap) => recalculateRoadmapStatuses(roadmap, { preserveGenerating: false }));
+  const roadmaps = filterDemoRoadmaps((cache?.roadmaps ?? []).filter((r) => !deletedIds.has(r.id))).map(
+    (roadmap) => recalculateRoadmapStatuses(normalizeLocalRoadmapEntityIds(roadmap), { preserveGenerating: false }),
+  );
   return { roadmaps, deletedIds: [...deletedIds] };
 }
 
@@ -109,7 +114,7 @@ export async function persistRoadmapsCache(
   deletedIds: string[],
 ): Promise<void> {
   await writeRoadmapsCache({
-    roadmaps: normalizeRoadmapEntityIdsList(roadmaps),
+    roadmaps,
     deletedIds,
     updatedAt: new Date().toISOString(),
   });
@@ -127,13 +132,13 @@ async function reconcileLocalRoadmapsWithBackend(
   const pendingCreateIds = new Set(
     pending
       .filter((m) => m.type === 'create_roadmap')
-      .map((m) => normalizeRoadmapEntityIds(m.payload as GeneratedRoadmap).id),
+      .map((m) => normalizeLocalRoadmapEntityIds(m.payload as GeneratedRoadmap).id),
   );
 
   const nextDeleted = new Set(deletedIds);
   const nextLocal: GeneratedRoadmap[] = [];
 
-  for (const rm of normalizeRoadmapEntityIdsList(local)) {
+  for (const rm of local.map(normalizeLocalRoadmapEntityIds)) {
     if (nextDeleted.has(rm.id)) continue;
     if (remoteIds.has(rm.id) || pendingCreateIds.has(rm.id)) {
       nextLocal.push(rm);
@@ -190,21 +195,27 @@ export async function refreshRoadmapsFromBackend(
     if (existing) byId.set(summary.id, mergeRoadmapSummary(existing, summary));
   }
   for (const roadmap of fullNewRoadmaps) {
-    if (roadmap && !deleted.has(roadmap.id)) byId.set(roadmap.id, roadmap);
+    if (roadmap && !deleted.has(roadmap.id)) {
+      const existing = byId.get(roadmap.id);
+      byId.set(
+        roadmap.id,
+        existing ? mergeRoadmapPreservingLocalProgress(existing, roadmap) : roadmap,
+      );
+    }
   }
 
   const merged = [...byId.values()].sort(
     (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0),
   );
-  return { roadmaps: normalizeRoadmapEntityIdsList(merged), deletedIds: reconciled.deletedIds };
+  return { roadmaps: merged, deletedIds: reconciled.deletedIds };
 }
 
 async function flushUpdateRoadmap(roadmap: GeneratedRoadmap): Promise<ServerMutationResult<unknown>> {
-  const scopedRoadmap = normalizeRoadmapEntityIds(roadmap);
-  const sync = await ensureRoadmapSynced(scopedRoadmap);
+  const payloadRoadmap = repairRoadmapMutationPayload(roadmap);
+  const sync = await ensureRoadmapSynced(payloadRoadmap);
   if (!sync.ok) return { ok: false, errorMessage: sync.errorMessage };
 
-  for (const node of allRoadmapLessons(scopedRoadmap)) {
+  for (const node of allRoadmapLessons(payloadRoadmap)) {
     const needsSync =
       Boolean(node.generatedLessonId) ||
       node.status === 'completed' ||
@@ -212,13 +223,13 @@ async function flushUpdateRoadmap(roadmap: GeneratedRoadmap): Promise<ServerMuta
       node.status === 'error';
     if (!needsSync) continue;
 
-    const result = await patchServerRoadmapNode(scopedRoadmap.id, node.id, {
+    const result = await patchServerRoadmapNode(payloadRoadmap.id, node.id, {
       status: node.status,
       generatedLessonId: node.generatedLessonId ?? null,
     });
     if (!result.ok) return { ok: false, errorMessage: result.errorMessage };
   }
-  return { ok: true, data: scopedRoadmap };
+  return { ok: true, data: payloadRoadmap };
 }
 
 async function ensureRoadmapForLesson(
@@ -232,11 +243,11 @@ async function ensureRoadmapForLesson(
   const pendingCreate = pending.find(
     (m) =>
       m.type === 'create_roadmap' &&
-      normalizeRoadmapEntityIds(m.payload as GeneratedRoadmap).id === lesson.roadmapId,
+      normalizeLocalRoadmapEntityIds(m.payload as GeneratedRoadmap).id === lesson.roadmapId,
   );
   if (pendingCreate) {
     const created = await createServerRoadmap(
-      normalizeRoadmapEntityIds(pendingCreate.payload as GeneratedRoadmap),
+      normalizeLocalRoadmapEntityIds(pendingCreate.payload as GeneratedRoadmap),
     );
     if (created.ok) {
       await removePendingMutation(pendingCreate.id);
@@ -249,12 +260,12 @@ async function ensureRoadmapForLesson(
     pending.find(
       (m) =>
         m.type === 'update_roadmap' &&
-        normalizeRoadmapEntityIds(m.payload as GeneratedRoadmap).id === lesson.roadmapId,
+        normalizeLocalRoadmapEntityIds(m.payload as GeneratedRoadmap).id === lesson.roadmapId,
     )?.payload ?? null
   ) as GeneratedRoadmap | null;
 
   if (payloadRoadmap) {
-    const sync = await ensureRoadmapSynced(normalizeRoadmapEntityIds(payloadRoadmap));
+    const sync = await ensureRoadmapSynced(normalizeLocalRoadmapEntityIds(payloadRoadmap));
     return sync.ok ? { ok: true } : { ok: false, errorMessage: sync.errorMessage };
   }
 
@@ -272,7 +283,7 @@ async function applyMutation(mutation: PendingMutation): Promise<ServerMutationR
       const payload = mutation.payload as { lesson: GeneratedLesson; roadmap?: GeneratedRoadmap };
       const lesson = payload.lesson ?? (mutation.payload as GeneratedLesson);
       if (payload.roadmap) {
-        const sync = await ensureRoadmapSynced(normalizeRoadmapEntityIds(payload.roadmap));
+        const sync = await ensureRoadmapSynced(normalizeLocalRoadmapEntityIds(payload.roadmap));
         if (!sync.ok) return { ok: false, errorMessage: sync.errorMessage };
       } else {
         const rmCheck = await ensureRoadmapForLesson(lesson, pending);
@@ -283,13 +294,13 @@ async function applyMutation(mutation: PendingMutation): Promise<ServerMutationR
     case 'delete_lesson':
       return deleteServerLesson((mutation.payload as { id: string }).id);
     case 'create_roadmap': {
-      const roadmap = normalizeRoadmapEntityIds(mutation.payload as GeneratedRoadmap);
+      const roadmap = normalizeLocalRoadmapEntityIds(mutation.payload as GeneratedRoadmap);
       const existing = await listServerRoadmaps();
       if (existing.some((r) => r.id === roadmap.id)) return { ok: true, data: roadmap };
       return createServerRoadmap(roadmap);
     }
     case 'update_roadmap':
-      return flushUpdateRoadmap(normalizeRoadmapEntityIds(mutation.payload as GeneratedRoadmap));
+      return flushUpdateRoadmap(repairRoadmapMutationPayload(mutation.payload as GeneratedRoadmap));
     case 'delete_roadmap':
       return deleteServerRoadmap((mutation.payload as { id: string }).id);
     case 'delete_review_set':
@@ -322,24 +333,26 @@ export async function flushPendingMutations(): Promise<{ flushed: number; failed
 
 export async function syncRoadmapNodeToBackend(roadmap: GeneratedRoadmap, nodeId: string): Promise<void> {
   if (!isServerConfigured()) return;
-  const scopedRoadmap = normalizeRoadmapEntityIds(roadmap);
-  const node = allRoadmapLessons(scopedRoadmap).find((n) => n.id === nodeId);
+  const payloadRoadmap = repairRoadmapMutationPayload(roadmap);
+  const canonicalNodeId = resolveRoadmapNodeId(payloadRoadmap, nodeId);
+  if (!canonicalNodeId) return;
+  const node = allRoadmapLessons(payloadRoadmap).find((n) => n.id === canonicalNodeId);
   if (!node) return;
 
-  const sync = await ensureRoadmapSynced(scopedRoadmap);
+  const sync = await ensureRoadmapSynced(payloadRoadmap);
   if (!sync.ok) {
-    console.warn('[roadmap-sync] node sync skipped - roadmap not on backend', scopedRoadmap.id, sync.errorMessage);
-    await enqueuePendingMutation('update_roadmap', scopedRoadmap);
+    console.warn('[roadmap-sync] node sync skipped - roadmap not on backend', payloadRoadmap.id, sync.errorMessage);
+    await enqueuePendingMutation('update_roadmap', payloadRoadmap);
     return;
   }
 
-  const result = await patchServerRoadmapNode(scopedRoadmap.id, nodeId, {
+  const result = await patchServerRoadmapNode(payloadRoadmap.id, canonicalNodeId, {
     status: node.status,
     generatedLessonId: node.generatedLessonId ?? null,
   });
   if (!result.ok) {
-    console.warn('[roadmap-sync] node patch failed', scopedRoadmap.id, nodeId, result.errorMessage);
-    await enqueuePendingMutation('update_roadmap', scopedRoadmap);
+    console.warn('[roadmap-sync] node patch failed', payloadRoadmap.id, canonicalNodeId, result.errorMessage);
+    await enqueuePendingMutation('update_roadmap', payloadRoadmap);
   }
 }
 
@@ -376,7 +389,7 @@ export async function migrateLegacyLocalDataToBackend(): Promise<void> {
       const parsed = JSON.parse(legacyRoadmapsRaw) as GeneratedRoadmap[];
       if (Array.isArray(parsed)) {
         for (const roadmap of parsed) {
-          const scopedRoadmap = normalizeRoadmapEntityIds(roadmap);
+          const scopedRoadmap = normalizeLocalRoadmapEntityIds(roadmap);
           if (roadmapIds.has(scopedRoadmap.id)) continue;
           await createServerRoadmap(scopedRoadmap);
         }

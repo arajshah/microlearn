@@ -43,7 +43,13 @@ import {
   recalculateRoadmapStatuses,
   setNodeStatus,
 } from '@/utils/roadmapProgress';
-import { normalizeRoadmapEntityIds, normalizeRoadmapEntityIdsList } from '@/utils/roadmapIds';
+import {
+  isServerOriginatedRoadmap,
+  normalizeLocalRoadmapEntityIds,
+  repairRoadmapMutationPayload,
+  repairStaleRoadmapFromServer,
+  resolveRoadmapNodeId,
+} from '@/utils/roadmapIds';
 
 const LAST_OPENED_KEY = 'microlearn.roadmaps.lastOpened.v1';
 const DEFAULT_SUBJECT = 'computer-science';
@@ -115,7 +121,11 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
 
   const applyRoadmaps = useCallback(
     async (next: GeneratedRoadmap[], deletedIds: string[]) => {
-      const normalized = normalizeRoadmapEntityIdsList(next);
+      const normalized = next.map((roadmap) =>
+        isServerOriginatedRoadmap(roadmap)
+          ? roadmap
+          : normalizeLocalRoadmapEntityIds(roadmap),
+      );
       roadmapsRef.current = normalized;
       deletedRoadmapIdsRef.current = deletedIds;
       setRoadmaps(normalized);
@@ -180,13 +190,15 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
 
   const persist = useCallback(
     async (roadmap: GeneratedRoadmap) => {
-      const normalizedRoadmap = normalizeRoadmapEntityIds(roadmap);
+      const storedRoadmap = isServerOriginatedRoadmap(roadmap)
+        ? repairRoadmapMutationPayload(roadmap)
+        : normalizeLocalRoadmapEntityIds(roadmap);
       const prev = roadmapsRef.current;
-      const idx = prev.findIndex((r) => r.id === normalizedRoadmap.id);
+      const idx = prev.findIndex((r) => r.id === storedRoadmap.id);
       const next =
         idx === -1
-          ? [normalizedRoadmap, ...prev]
-          : prev.map((r, i) => (i === idx ? normalizedRoadmap : r));
+          ? [storedRoadmap, ...prev]
+          : prev.map((r, i) => (i === idx ? storedRoadmap : r));
       roadmapsRef.current = next;
       setRoadmaps(next);
       await persistRoadmapsCache(next, deletedRoadmapIdsRef.current);
@@ -211,9 +223,9 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
         const remote = await fetchServerRoadmap(id);
         if (!remote) return local;
 
-        const fresh = normalizeRoadmapEntityIds(
-          local ? mergeRoadmapPreservingLocalProgress(local, remote) : remote,
-        );
+        const fresh = local
+          ? repairStaleRoadmapFromServer(local, remote)
+          : remote;
         await persist(fresh);
         return fresh;
       })().finally(() => {
@@ -251,7 +263,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
           sourceContext: input.sourceContext,
           idempotencyKey: `${input.topic}:${input.goal}:${Date.now()}`,
         });
-        const normalized = normalizeRoadmapEntityIds({
+        const normalized = {
           ...roadmap,
           targetLessonCount: input.lessonCount,
           slidesPerLesson: input.slidesPerLesson,
@@ -259,7 +271,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
           sourceUrl: input.sourceUrl,
           sourceExtractionId: input.sourceExtractionId,
           sourceContext: input.sourceContext,
-        });
+        };
         const next = [normalized, ...roadmapsRef.current.filter((r) => r.id !== normalized.id)];
         roadmapsRef.current = next;
         setRoadmaps(next);
@@ -310,7 +322,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
 
   const updateRoadmapLocal = useCallback(
     async (roadmap: GeneratedRoadmap) => {
-      await persist(normalizeRoadmapEntityIds(roadmap));
+      await persist(repairRoadmapMutationPayload(roadmap));
     },
     [persist],
   );
@@ -332,7 +344,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
           fromNodeId: afterNodeId,
           count,
         });
-        await persist(normalizeRoadmapEntityIds(result.roadmap));
+        await persist(result.roadmap);
         for (const nodeId of [...result.generated, ...result.reused]) {
           const node = findRoadmapNode(result.roadmap, nodeId);
           if (!node?.generatedLessonId) continue;
@@ -374,8 +386,9 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       }
       let roadmap = getRoadmapById(roadmapId);
       if (!roadmap) throw new ServerGenerationError('Roadmap not found.');
-      roadmap = normalizeRoadmapEntityIds(roadmap);
-      const node = findRoadmapNode(roadmap, nodeId);
+      const canonicalNodeId = resolveRoadmapNodeId(roadmap, nodeId);
+      if (!canonicalNodeId) throw new ServerGenerationError('Lesson not found in roadmap.');
+      const node = findRoadmapNode(roadmap, canonicalNodeId);
       if (!node) throw new ServerGenerationError('Lesson not found in roadmap.');
       if (node.status === 'locked') throw new ServerGenerationError('Complete prerequisites first.');
       if (node.status === 'generating') throw new ServerGenerationError('Lesson is still generating.');
@@ -392,14 +405,11 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       try {
         const result = await generateServerRoadmapNodeLesson({
           roadmapId,
-          nodeId,
+          nodeId: canonicalNodeId,
           subjectId: DEFAULT_SUBJECT,
         });
         await saveGeneratedLesson(result.lesson);
-        const nextRoadmap = recalculateRoadmapStatuses(
-          normalizeRoadmapEntityIds(result.roadmap),
-          { preserveGenerating: true },
-        );
+        const nextRoadmap = recalculateRoadmapStatuses(result.roadmap, { preserveGenerating: true });
         await persist(nextRoadmap);
         await openRoadmap(roadmapId);
         void pregenerateUpcomingLessons(nextRoadmap, node.id, 2);
@@ -428,14 +438,30 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
         console.warn('[roadmap] completion ignored; roadmap not loaded', roadmapId, nodeId);
         return;
       }
-      roadmap = markNodeCompleted(normalizeRoadmapEntityIds(roadmap), nodeId);
+      if (isServerConfigured()) {
+        const remote = await fetchServerRoadmap(roadmapId);
+        if (remote) {
+          roadmap = repairStaleRoadmapFromServer(roadmap, remote);
+        }
+      }
+      const canonicalNodeId = resolveRoadmapNodeId(roadmap, nodeId);
+      if (!canonicalNodeId) {
+        console.warn('[roadmap] completion ignored; node not found', roadmapId, nodeId);
+        return;
+      }
+      roadmap = markNodeCompleted(roadmap, canonicalNodeId);
       await persist(roadmap);
       await enqueuePendingMutation('update_roadmap', roadmap);
       setSyncPending(true);
-      if (outcome) await postServerOutcome(outcome).catch(() => false);
+      if (outcome) {
+        await postServerOutcome({
+          ...outcome,
+          roadmapNodeId: canonicalNodeId,
+        }).catch(() => false);
+      }
       const next = continueNode(roadmap);
       const syncResults = await Promise.allSettled([
-        syncRoadmapNodeToBackend(roadmap, nodeId),
+        syncRoadmapNodeToBackend(roadmap, canonicalNodeId),
         ...(next ? [syncRoadmapNodeToBackend(roadmap, next.id)] : []),
       ]);
       const nodeSyncFailed = syncResults.some((result) => result.status === 'rejected');
@@ -449,7 +475,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
           }
         })
         .catch(() => setSyncPending(true));
-      void pregenerateUpcomingLessons(roadmap, nodeId, 2);
+      void pregenerateUpcomingLessons(roadmap, canonicalNodeId, 2);
       void recordActivityEventSafe();
     },
     [

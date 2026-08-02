@@ -9,7 +9,7 @@ import {
   RoadmapSummary,
   RoadmapUnit,
 } from '@/types/roadmap';
-import { normalizeRoadmapEntityIds } from '@/utils/roadmapIds';
+import { resolveRoadmapNodeId } from '@/utils/roadmapIds';
 import { getApiToken } from '@/services/apiToken';
 
 /**
@@ -198,6 +198,9 @@ function mapUnit(unit: ServerUnit, index: number): RoadmapUnit {
 
 /** Maps a server roadmap payload into the app's GeneratedRoadmap shape. */
 export function mapServerRoadmap(server: ServerRoadmap): GeneratedRoadmap {
+  const units = (server.units ?? []).map((u, i) => mapUnit(u, i));
+  const lessons = units.flatMap((unit) => unit.lessons);
+  const completedLessonCount = lessons.filter((lesson) => lesson.status === 'completed').length;
   return {
     id: server.id,
     title: server.title,
@@ -208,7 +211,13 @@ export function mapServerRoadmap(server: ServerRoadmap): GeneratedRoadmap {
     depth: coerceDepth(server.depth),
     estimatedTotalMinutes: server.estimatedTotalMinutes ?? 0,
     createdAt: server.createdAt ?? new Date().toISOString(),
-    units: (server.units ?? []).map((u, i) => mapUnit(u, i)),
+    units,
+    serverSummary: {
+      unitCount: units.length,
+      lessonCount: lessons.length,
+      completedLessonCount,
+      progress: lessons.length > 0 ? completedLessonCount / lessons.length : 0,
+    },
   };
 }
 
@@ -589,7 +598,7 @@ export async function generateServerRoadmap(input: {
     GENERATION_TIMEOUT_MS,
   );
   if (!result.data?.roadmap) throwGenerationFailure(result);
-  return normalizeRoadmapEntityIds(mapServerRoadmap(result.data.roadmap));
+  return mapServerRoadmap(result.data.roadmap);
 }
 
 /** Generate and persist a standalone lesson on the backend. */
@@ -634,7 +643,7 @@ export async function generateServerRoadmapNodeLesson(input: {
   if (!result.data?.lesson || !result.data.roadmap) throwGenerationFailure(result);
   return {
     lesson: mapServerLessonToApp(result.data.lesson),
-    roadmap: normalizeRoadmapEntityIds(mapServerRoadmap(result.data.roadmap)),
+    roadmap: mapServerRoadmap(result.data.roadmap),
     reused: Boolean(result.data.reused),
   };
 }
@@ -669,7 +678,7 @@ export async function pregenerateServerRoadmapLessons(input: {
     reused: result.data.reused ?? [],
     skipped: result.data.skipped ?? [],
     failed: result.data.failed ?? [],
-    roadmap: normalizeRoadmapEntityIds(mapServerRoadmap(result.data.roadmap)),
+    roadmap: mapServerRoadmap(result.data.roadmap),
   };
 }
 
@@ -737,6 +746,13 @@ export async function patchServerRoadmapNode(
     return { ok: false, errorMessage: result.errorMessage ?? 'Failed to update roadmap node.' };
   }
   return { ok: true, data: mapServerRoadmap(result.data.roadmap) };
+}
+
+export function resolveServerRoadmapNodeId(
+  roadmap: GeneratedRoadmap,
+  requestedId: string,
+): string | null {
+  return resolveRoadmapNodeId(roadmap, requestedId);
 }
 
 /** Fetches a generated lesson payload by id. Returns the raw lesson object or null. */

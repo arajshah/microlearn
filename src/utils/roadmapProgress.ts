@@ -3,6 +3,7 @@ import {
   RoadmapLessonNode,
   RoadmapNodeStatus,
 } from '@/types/roadmap';
+import { resolveRoadmapNodeId } from '@/utils/roadmapIds';
 
 export function allRoadmapLessons(roadmap: GeneratedRoadmap): RoadmapLessonNode[] {
   const units = [...roadmap.units].sort((a, b) => a.order - b.order);
@@ -18,8 +19,10 @@ export function findRoadmapNode(
   roadmap: GeneratedRoadmap,
   nodeId: string,
 ): RoadmapLessonNode | undefined {
+  const canonicalId = resolveRoadmapNodeId(roadmap, nodeId);
+  if (!canonicalId) return undefined;
   for (const unit of roadmap.units) {
-    const node = unit.lessons.find((l) => l.id === nodeId);
+    const node = unit.lessons.find((l) => l.id === canonicalId);
     if (node) return node;
   }
   return undefined;
@@ -72,8 +75,12 @@ export function continueNode(roadmap: GeneratedRoadmap): RoadmapLessonNode | und
 function prereqsMet(
   node: RoadmapLessonNode,
   completedIds: Set<string>,
+  roadmap: GeneratedRoadmap,
 ): boolean {
-  return node.prerequisiteIds.every((id) => completedIds.has(id));
+  return node.prerequisiteIds.every((id) => {
+    const canonical = resolveRoadmapNodeId(roadmap, id) ?? id;
+    return completedIds.has(canonical);
+  });
 }
 
 /**
@@ -96,7 +103,7 @@ export function recalculateRoadmapStatuses(
     }
     if (node.status === 'completed') return { ...node, status: 'completed' as const };
 
-    const unlocked = prereqsMet(node, completedIds);
+    const unlocked = prereqsMet(node, completedIds, roadmap);
     if (!unlocked) return { ...node, status: 'locked' as const };
     return { ...node, status: 'available' as const };
   });
@@ -123,12 +130,13 @@ export function markNodeCompleted(
   roadmap: GeneratedRoadmap,
   nodeId: string,
 ): GeneratedRoadmap {
+  const canonicalId = resolveRoadmapNodeId(roadmap, nodeId) ?? nodeId;
   const updated: GeneratedRoadmap = {
     ...roadmap,
     units: roadmap.units.map((unit) => ({
       ...unit,
       lessons: unit.lessons.map((l) =>
-        l.id === nodeId ? { ...l, status: 'completed' as const } : l,
+        l.id === canonicalId ? { ...l, status: 'completed' as const } : l,
       ),
     })),
   };
@@ -141,12 +149,13 @@ export function setNodeStatus(
   status: RoadmapNodeStatus,
   patch?: Partial<RoadmapLessonNode>,
 ): GeneratedRoadmap {
+  const canonicalId = resolveRoadmapNodeId(roadmap, nodeId) ?? nodeId;
   return {
     ...roadmap,
     units: roadmap.units.map((unit) => ({
       ...unit,
       lessons: unit.lessons.map((l) =>
-        l.id === nodeId ? { ...l, ...patch, status } : l,
+        l.id === canonicalId ? { ...l, ...patch, status } : l,
       ),
     })),
   };
@@ -158,12 +167,16 @@ export function lockedReason(
 ): string {
   const flat = allRoadmapLessons(roadmap);
   const byId = new Map(flat.map((l) => [l.id, l]));
-  const missing = node.prerequisiteIds.filter(
-    (id) => byId.get(id)?.status !== 'completed',
-  );
+  const missing = node.prerequisiteIds.filter((id) => {
+    const canonical = resolveRoadmapNodeId(roadmap, id) ?? id;
+    return byId.get(canonical)?.status !== 'completed';
+  });
   if (missing.length === 0) return 'Complete prior lessons to unlock.';
   const titles = missing
-    .map((id) => byId.get(id)?.title ?? id)
+    .map((id) => {
+      const canonical = resolveRoadmapNodeId(roadmap, id) ?? id;
+      return byId.get(canonical)?.title ?? id;
+    })
     .slice(0, 3)
     .join(', ');
   return `Complete first: ${titles}${missing.length > 3 ? '…' : ''}`;
@@ -174,7 +187,9 @@ export function buildLessonContext(
   nodeId: string,
 ): import('@/types/roadmap').RoadmapLessonContext | undefined {
   const flat = allRoadmapLessons(roadmap);
-  const idx = flat.findIndex((l) => l.id === nodeId);
+  const canonicalId = resolveRoadmapNodeId(roadmap, nodeId);
+  if (!canonicalId) return undefined;
+  const idx = flat.findIndex((l) => l.id === canonicalId);
   if (idx === -1) return undefined;
   const node = flat[idx];
   const unit = findRoadmapUnit(roadmap, node.unitId);

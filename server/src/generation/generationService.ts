@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../db';
 import { ApiError, notFound } from '../api/apiError';
+import { resolveRoadmapNodeId } from '../roadmaps/nodeIdResolver';
 import {
   createRoadmap,
   getGeneratedLesson,
@@ -128,13 +129,14 @@ function failJob(db: Db, jobId: string, err: unknown): void {
 }
 
 function activeLessonForNode(db: Db, roadmapId: string, nodeId: string) {
+  const canonicalNodeId = resolveRoadmapNodeId(db, roadmapId, nodeId) ?? nodeId;
   const row = db
     .prepare(
       `SELECT * FROM generated_lessons
        WHERE roadmap_id = ? AND lesson_node_id = ? AND status = 'active'
        ORDER BY updated_at DESC LIMIT 1`,
     )
-    .get(roadmapId, nodeId) as GeneratedLessonRow | undefined;
+    .get(roadmapId, canonicalNodeId) as GeneratedLessonRow | undefined;
   return row ? getGeneratedLesson(db, row.id) : null;
 }
 
@@ -165,9 +167,11 @@ function insertBlueprint(
 }
 
 function loadNodeRow(db: Db, roadmapId: string, nodeId: string): LessonNodeRow {
+  const canonicalNodeId = resolveRoadmapNodeId(db, roadmapId, nodeId);
+  if (!canonicalNodeId) throw notFound(`Lesson node "${nodeId}" not found in roadmap.`);
   const row = db
     .prepare('SELECT * FROM lesson_nodes WHERE roadmap_id = ? AND id = ?')
-    .get(roadmapId, nodeId) as LessonNodeRow | undefined;
+    .get(roadmapId, canonicalNodeId) as LessonNodeRow | undefined;
   if (!row) throw notFound(`Lesson node "${nodeId}" not found in roadmap.`);
   return row;
 }
@@ -265,18 +269,19 @@ export async function generateRoadmapNodeLesson(
   db: Db,
   input: { roadmapId: string; nodeId: string; subjectId?: string; idempotencyKey?: string },
 ) {
-  const existing = activeLessonForNode(db, input.roadmapId, input.nodeId);
+  const node = loadNodeRow(db, input.roadmapId, input.nodeId);
+  const canonicalNodeId = node.id;
+  const existing = activeLessonForNode(db, input.roadmapId, canonicalNodeId);
   if (existing) return { lesson: existing, reused: true };
 
-  const node = loadNodeRow(db, input.roadmapId, input.nodeId);
   assertNodeEligible(db, node);
   const key = input.idempotencyKey?.trim()
     ? `node:${input.idempotencyKey.trim()}`
-    : `node:${input.roadmapId}:${input.nodeId}`;
+    : `node:${input.roadmapId}:${canonicalNodeId}`;
   const begin = beginJob(db, {
     key,
     entityType: 'roadmap_node_lesson',
-    entityId: `${input.roadmapId}:${input.nodeId}`,
+    entityId: `${input.roadmapId}:${canonicalNodeId}`,
     request: input,
   });
   if (begin.action === 'completed') {
@@ -286,12 +291,12 @@ export async function generateRoadmapNodeLesson(
     throw new ApiError(409, 'Lesson generation is already in progress for this node.', 'GENERATION_IN_PROGRESS');
   }
 
-  patchLessonNode(db, input.roadmapId, input.nodeId, { status: 'generating' });
+  patchLessonNode(db, input.roadmapId, canonicalNodeId, { status: 'generating' });
   try {
     const roadmap = getRoadmap(db, input.roadmapId);
     const ctx = buildLessonGenerationContext(db, {
       roadmapId: input.roadmapId,
-      nodeId: input.nodeId,
+      nodeId: canonicalNodeId,
       slidesPerLesson: Math.max(3, Math.min(20, node.estimated_minutes + 2)),
     });
     const provider = createAiGenerationProvider();
@@ -303,13 +308,13 @@ export async function generateRoadmapNodeLesson(
         masteryLevel: roadmap.masteryLevel,
         slideCount: ctx.slidesPerLesson,
         roadmapId: input.roadmapId,
-        roadmapNodeId: input.nodeId,
+        roadmapNodeId: canonicalNodeId,
       },
       db,
     );
     const blueprint = insertBlueprint(db, {
       roadmapId: input.roadmapId,
-      lessonNodeId: input.nodeId,
+      lessonNodeId: canonicalNodeId,
       blueprint: lessonJson.blueprint,
     });
     const lesson = upsertGeneratedLesson(db, {
@@ -317,19 +322,19 @@ export async function generateRoadmapNodeLesson(
       topic: node.title,
       title: String(lessonJson.title ?? node.title),
       roadmapId: input.roadmapId,
-      lessonNodeId: input.nodeId,
+      lessonNodeId: canonicalNodeId,
       blueprintId: blueprint.id,
       lessonJson: {
         ...lessonJson,
         roadmapId: input.roadmapId,
-        roadmapNodeId: input.nodeId,
+        roadmapNodeId: canonicalNodeId,
         blueprintId: blueprint.id,
         blueprintVersion: blueprint.version,
       },
       model: provider.model,
       promptVersion: LESSON_GENERATION_PROMPT_VERSION,
     });
-    patchLessonNode(db, input.roadmapId, input.nodeId, {
+    patchLessonNode(db, input.roadmapId, canonicalNodeId, {
       status: 'active',
       generatedLessonId: lesson.id,
     });
@@ -342,14 +347,14 @@ export async function generateRoadmapNodeLesson(
       metadata: {
         jobId: begin.job.id,
         roadmapId: input.roadmapId,
-        nodeId: input.nodeId,
+        nodeId: canonicalNodeId,
         model: provider.model,
         qualityScore: lessonJson.generationMetadata?.qualityScore,
       },
     });
     return { lesson: getGeneratedLesson(db, lesson.id), reused: false };
   } catch (err) {
-    patchLessonNode(db, input.roadmapId, input.nodeId, { status: 'error' });
+    patchLessonNode(db, input.roadmapId, canonicalNodeId, { status: 'error' });
     failJob(db, begin.job.id, err);
     throw safeGenerationError(err);
   }
@@ -361,7 +366,15 @@ export async function pregenerateRoadmapLessons(
 ) {
   const roadmap = getRoadmap(db, input.roadmapId);
   const flat = roadmap.units.flatMap((unit) => unit.lessons);
-  const start = input.fromNodeId ? Math.max(0, flat.findIndex((node) => node.id === input.fromNodeId) + 1) : 0;
+  const start = input.fromNodeId
+    ? Math.max(
+        0,
+        flat.findIndex((node) => {
+          const canonical = resolveRoadmapNodeId(db, input.roadmapId, input.fromNodeId!);
+          return canonical ? node.id === canonical : false;
+        }) + 1,
+      )
+    : 0;
   const limit = Math.min(5, Math.max(0, input.count ?? 2));
   const generated: string[] = [];
   const reused: string[] = [];
