@@ -143,7 +143,7 @@ export default function LearnScreen() {
       <View style={styles.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.title}>Paths</Text>
-          <Text style={styles.subtitle}>Your long-term learning journeys</Text>
+          <Text style={styles.subtitle}>Expeditions through your subject galaxies</Text>
         </View>
         <Pressable onPress={() => router.push('/search')} hitSlop={8} style={styles.iconBtn}>
           <Ionicons name="search" size={18} color={colors.textMuted} />
@@ -199,9 +199,9 @@ export default function LearnScreen() {
         ) : (
           <GlassCard accent={colors.paths}>
             <EmptyState
-              icon="map-outline"
-              title="No path in progress"
-              message="Create a roadmap to start a structured learning journey."
+              icon="planet-outline"
+              title="No expedition in progress"
+              message="Create a roadmap to chart a structured path through a subject galaxy."
               actionLabel="Create roadmap"
               onActionPress={() => router.push('/create')}
               accent={colors.paths}

@@ -28,25 +28,25 @@ interface TierStyle {
 
 const TIER_STYLES: Record<BadgeTier, TierStyle> = {
   bronze: {
-    label: 'Ember',
+    label: 'Orbit',
     accent: '#FF9D5C',
-    cardGradient: ['#2A1C1A', '#151A27'],
+    cardGradient: ['#2A1C1A', '#0E1524'],
     planetGradient: ['#FFB36B', '#B94122'],
   },
   silver: {
-    label: 'Nova',
+    label: 'Stellar',
     accent: '#B9CEFF',
-    cardGradient: ['#1B273D', '#141A28'],
+    cardGradient: ['#1B273D', '#0E1524'],
     planetGradient: ['#EDF4FF', '#718ABD'],
   },
   gold: {
-    label: 'Supernova',
+    label: 'Nebula',
     accent: '#FFD966',
-    cardGradient: ['#302714', '#171A24'],
+    cardGradient: ['#302714', '#0E1524'],
     planetGradient: ['#FFF19A', '#F59E0B'],
   },
   legendary: {
-    label: 'Singularity',
+    label: 'Event Horizon',
     accent: '#70E1F5',
     cardGradient: ['#241A3C', '#102632'],
     planetGradient: ['#A78BFA', '#22D3EE'],

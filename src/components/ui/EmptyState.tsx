@@ -23,7 +23,8 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <View style={styles.wrap}>
-      <View style={[styles.iconWrap, { backgroundColor: `${accent}1F`, borderColor: `${accent}33` }]}>
+      <View style={[styles.orbit, { borderColor: `${accent}44` }]} />
+      <View style={[styles.iconWrap, { backgroundColor: `${accent}1F`, borderColor: `${accent}44` }]}>
         <Ionicons name={icon} size={30} color={accent} />
       </View>
       <Text style={styles.title}>{title}</Text>
@@ -41,6 +42,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.md,
     paddingVertical: spacing.xxl,
+  },
+  orbit: {
+    position: 'absolute',
+    width: 110,
+    height: 110,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    opacity: 0.5,
+    top: spacing.xl,
   },
   iconWrap: {
     width: 72,

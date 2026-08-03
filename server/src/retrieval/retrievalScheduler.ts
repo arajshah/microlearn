@@ -6,10 +6,6 @@ function addDays(base: Date, days: number): Date {
   return d;
 }
 
-export function isDue(dueAt: string, now = new Date()): boolean {
-  return new Date(dueAt).getTime() <= now.getTime();
-}
-
 export function initialSchedule(now = new Date(), dueTomorrow = false): ScheduleState {
   return {
     reps: 0,

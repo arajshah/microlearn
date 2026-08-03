@@ -1,14 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useMemo } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TutorPanel } from '@/components/TutorPanel';
 import { useLibrary } from '@/context/LibraryContext';
@@ -24,38 +17,63 @@ export default function TutorScreen() {
     cardIndex?: string;
   }>();
 
-  const { context, contextLabel } = useMemo(() => {
-    if (!lessonId) return { context: undefined, contextLabel: null };
+  const { context, contextLabel, cardLabel, sessionKey } = useMemo(() => {
+    if (!lessonId) {
+      return {
+        context: undefined,
+        contextLabel: null,
+        cardLabel: null,
+        sessionKey: 'tutor-standalone',
+      };
+    }
     const loc = resolveLesson(lessonId);
-    if (!loc) return { context: undefined, contextLabel: null };
+    if (!loc) {
+      return {
+        context: undefined,
+        contextLabel: null,
+        cardLabel: null,
+        sessionKey: `tutor-${lessonId}`,
+      };
+    }
     const idx = cardIndex ? parseInt(cardIndex, 10) : 0;
     const card = loc.lesson.cards[idx];
     const header = `${loc.subject.title} — ${loc.lesson.title}`;
+    const title =
+      card && 'title' in card && typeof card.title === 'string' && card.title.trim()
+        ? card.title.trim()
+        : `Card ${idx + 1}`;
     return {
       context: card ? `${header}\n${cardToTutorContext(card)}` : header,
       contextLabel: loc.lesson.title,
+      cardLabel: title,
+      sessionKey: `tutor-${lessonId}`,
     };
   }, [lessonId, cardIndex, resolveLesson]);
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.screen, { paddingTop: insets.top }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={insets.top}
-    >
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Close tutor"
+        >
           <Ionicons name="close" size={24} color={colors.textMuted} />
         </Pressable>
         <Text style={styles.headerTitle}>Ask the tutor</Text>
-        <View style={{ width: 32 }} />
+        <View style={{ width: 44 }} />
       </View>
+      {/* TutorPanel owns keyboard avoidance for this route — no nested KAV. */}
       <TutorPanel
         context={context}
         contextLabel={contextLabel}
+        cardLabel={cardLabel}
         variant="fullscreen"
+        sessionKey={sessionKey}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -68,7 +86,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
   },
-  backBtn: { padding: 4 },
+  backBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: {
     color: colors.text,
     fontSize: font.size.md,

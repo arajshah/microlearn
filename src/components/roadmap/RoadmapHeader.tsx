@@ -25,8 +25,9 @@ export function RoadmapHeader({
 
   return (
     <View style={styles.wrap}>
+      <Text style={styles.eyebrow}>Expedition chart</Text>
       <Text style={styles.title}>{roadmap.title}</Text>
-      <Text style={styles.goalLabel}>Goal</Text>
+      <Text style={styles.goalLabel}>Mission goal</Text>
       <Text style={styles.goal}>{roadmap.goal}</Text>
 
       <View style={styles.metaRow}>
@@ -41,11 +42,11 @@ export function RoadmapHeader({
       <View style={styles.progressBlock}>
         <View style={styles.progressRow}>
           <Text style={styles.progressLabel}>
-            {completed} of {total} lessons completed
+            {completed} of {total} destinations illuminated
           </Text>
           <Text style={styles.progressPct}>{Math.round(pct * 100)}%</Text>
         </View>
-        <ProgressBar progress={pct} color={colors.primary} height={8} />
+        <ProgressBar progress={pct} color={colors.constellation} height={8} />
         <Text style={styles.remaining}>
           Estimated time remaining: {remainingMinutes} min
         </Text>
@@ -54,6 +55,8 @@ export function RoadmapHeader({
       <Pressable
         onPress={onContinue}
         disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel="Continue expedition"
         style={[styles.continueBtn, disabled && styles.continueBtnDisabled]}
       >
         {continueLoading ? (
@@ -72,12 +75,19 @@ export function RoadmapHeader({
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.nebula,
     borderRadius: radius.xl,
     padding: spacing.xl,
     borderWidth: 1,
     borderColor: colors.borderSoft,
     gap: spacing.sm,
+  },
+  eyebrow: {
+    color: colors.constellation,
+    fontSize: 10,
+    fontWeight: font.weight.bold as '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   title: {
     color: colors.text,

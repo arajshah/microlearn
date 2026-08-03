@@ -16,7 +16,6 @@ import type {
   DailyActivityRow,
   LearningStreakRow,
   StreakType,
-  UserAchievementRow,
 } from './gamificationTypes';
 import { countRetrievalItems, getRetrievalSummary } from '../retrieval/retrievalRepository';
 
@@ -310,14 +309,6 @@ export function buildProfileSummary(db: Db): SerializedProfileSummary {
 
 export function getAchievementByKey(db: Db, key: string): AchievementRow | undefined {
   return db.prepare('SELECT * FROM achievements WHERE key = ?').get(key) as AchievementRow | undefined;
-}
-
-export function listAllAchievementRows(db: Db): AchievementRow[] {
-  return db.prepare('SELECT * FROM achievements ORDER BY category, tier').all() as AchievementRow[];
-}
-
-export function listUserAchievements(db: Db): UserAchievementRow[] {
-  return db.prepare('SELECT * FROM user_achievements ORDER BY unlocked_at DESC').all() as UserAchievementRow[];
 }
 
 export function getMetricsSnapshot(db: Db): Record<string, number> {

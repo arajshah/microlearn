@@ -21,10 +21,11 @@ export function GlassCard({
   return (
     <View style={[styles.wrap, elevated && shadow.card, style]}>
       <LinearGradient
-        colors={[`${accent}18`, colors.surface]}
+        colors={[`${accent}22`, colors.nebula, colors.surface]}
+        locations={[0, 0.45, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.card, { padding, borderColor: `${accent}33` }]}
+        style={[styles.card, { padding, borderColor: `${accent}40` }]}
       >
         {children}
       </LinearGradient>

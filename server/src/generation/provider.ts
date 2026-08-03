@@ -1,11 +1,60 @@
 import { ApiError } from '../api/apiError';
 import { logger } from '../logger';
 
+/** Options for chat-style text generation. Lesson/roadmap callers keep defaults. */
+export interface TextGenerationOptions {
+  maxTokens: number;
+  /** Defaults to 0.55 for lesson/roadmap generation. Tutor uses a lower value. */
+  temperature?: number;
+}
+
+export const DEFAULT_TEXT_TEMPERATURE = 0.55;
+export const TUTOR_TEXT_TEMPERATURE = 0.28;
+export const TUTOR_MAX_TOKENS = 450;
+
 export interface AiGenerationProvider {
   readonly model: string;
   requestJson(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string>;
   requestRaw(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string>;
-  requestText(systemPrompt: string, messages: Array<{ role: 'user' | 'assistant'; content: string }>, maxTokens: number): Promise<string>;
+  requestText(
+    systemPrompt: string,
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    maxTokensOrOptions: number | TextGenerationOptions,
+  ): Promise<string>;
+}
+
+function resolveTextOptions(maxTokensOrOptions: number | TextGenerationOptions): {
+  maxTokens: number;
+  temperature: number;
+} {
+  if (typeof maxTokensOrOptions === 'number') {
+    return { maxTokens: maxTokensOrOptions, temperature: DEFAULT_TEXT_TEMPERATURE };
+  }
+  return {
+    maxTokens: maxTokensOrOptions.maxTokens,
+    temperature:
+      typeof maxTokensOrOptions.temperature === 'number'
+        ? maxTokensOrOptions.temperature
+        : DEFAULT_TEXT_TEMPERATURE,
+  };
+}
+
+/** Extract only assistant-visible answer content; ignore provider reasoning fields. */
+export function extractAssistantVisibleContent(data: unknown): string {
+  const payload = data as {
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        reasoning?: string | null;
+        reasoning_content?: string | null;
+      };
+      text?: string | null;
+      reasoning?: string | null;
+    }>;
+  };
+  const choice = payload.choices?.[0];
+  const content = choice?.message?.content ?? choice?.text ?? '';
+  return typeof content === 'string' ? content : '';
 }
 
 interface ProviderConfig {
@@ -95,9 +144,16 @@ class OpenAiCompatibleProvider implements AiGenerationProvider {
   async requestText(
     systemPrompt: string,
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-    maxTokens: number,
+    maxTokensOrOptions: number | TextGenerationOptions,
   ): Promise<string> {
-    return this.requestCompletion(systemPrompt, messages, maxTokens, false);
+    const options = resolveTextOptions(maxTokensOrOptions);
+    return this.requestCompletion(
+      systemPrompt,
+      messages,
+      options.maxTokens,
+      false,
+      options.temperature,
+    );
   }
 
   private async requestCompletion(
@@ -105,10 +161,11 @@ class OpenAiCompatibleProvider implements AiGenerationProvider {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
     maxTokens: number,
     jsonMode: boolean,
+    temperature: number = DEFAULT_TEXT_TEMPERATURE,
   ): Promise<string> {
     const body: Record<string, unknown> = {
       model: this.config.model,
-      temperature: 0.55,
+      temperature,
       max_tokens: maxTokens,
       messages: [{ role: 'system', content: systemPrompt }, ...messages],
     };
@@ -143,10 +200,8 @@ class OpenAiCompatibleProvider implements AiGenerationProvider {
           }
           throw safeErrorForStatus(res.status);
         }
-        const data = (await res.json()) as {
-          choices?: Array<{ message?: { content?: string }; text?: string }>;
-        };
-        const content = data.choices?.[0]?.message?.content ?? data.choices?.[0]?.text ?? '';
+        const data: unknown = await res.json();
+        const content = extractAssistantVisibleContent(data);
         if (!content.trim()) {
           throw new ApiError(502, 'AI provider returned an empty response.', 'AI_EMPTY_RESPONSE');
         }
@@ -374,8 +429,9 @@ class FakeDeterministicProvider implements AiGenerationProvider {
   async requestText(
     _systemPrompt: string,
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-    _maxTokens: number,
+    maxTokensOrOptions: number | TextGenerationOptions,
   ): Promise<string> {
+    void maxTokensOrOptions;
     const last = [...messages].reverse().find((m) => m.role === 'user');
     return `Here is a concise tutor reply about: ${last?.content ?? 'your question'}.`;
   }

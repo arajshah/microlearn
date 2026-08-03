@@ -1,4 +1,4 @@
-import { sanitizeChatText, stripReasoningWrappers } from '@/ai/sanitize';
+import { stripReasoningWrappers } from '@/ai/sanitize';
 import { generateLessonBatched } from '@/ai/heavyLessonGeneration';
 import { inferLessonGenerationMode } from '@/ai/lessonGenerationStrategy';
 import { getMasteryTier, MasteryLevel } from '@/data/mastery';
@@ -430,11 +430,6 @@ interface ChatMessage {
   content: string;
 }
 
-export interface TutorMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 async function postChat(
   config: AiConfig,
   messages: ChatMessage[],
@@ -586,103 +581,4 @@ export async function generateLesson(
   }
 
   return parseLesson(content, finishReason, args.slideCount);
-}
-
-const TUTOR_SYSTEM = `You are a warm, sharp personal tutor inside a microlearning app.
-
-Style:
-- Be concise and conversational — usually 2-5 short sentences. Expand only when asked.
-- Write plain text only: no markdown, no asterisks, no headers, no code fences, no <thought> tags.
-- You may use simple bullet lines starting with "• " when listing 2-3 items.
-- Lead with the core idea, then a vivid example or analogy.
-- Be accurate. If unsure, say so. Never invent fake quotes or citations.
-- Stay on learning. Politely redirect off-topic requests back to the concept at hand.`;
-
-function buildTutorContext(context?: string): string {
-  if (!context) return TUTOR_SYSTEM;
-  return `${TUTOR_SYSTEM}\n\nThe learner is currently studying this card:\n"""\n${context}\n"""\nGround your answers in this context when relevant.`;
-}
-
-/**
- * Conversational tutor reply (plain text, not JSON). Pass the recent message
- * history; optionally pass the current card text as grounding context.
- */
-export async function tutorReply(
-  config: AiConfig,
-  history: TutorMessage[],
-  context?: string,
-): Promise<string> {
-  if (!config.apiKey) throw new AiError('Add your API key in Settings first.');
-  if (!config.baseUrl) throw new AiError('Set a provider base URL in Settings.');
-  if (!config.model) throw new AiError('Choose a model in Settings.');
-
-  const messages: ChatMessage[] = [
-    { role: 'system', content: buildTutorContext(context) },
-    ...history.map((m) => ({ role: m.role, content: m.content })),
-  ];
-
-  logGroup('Tutor request', [
-    ['model', config.model],
-    ['turns', history.length],
-    ['has_context', Boolean(context)],
-  ]);
-
-  let res: Response;
-  try {
-    res = await postChat(config, messages, { json: false, maxTokens: 800 });
-  } catch (e: any) {
-    logGroup('Tutor network error', [['message', e?.message]]);
-    throw new AiError('Network error. Check your connection and base URL.');
-  }
-
-  if (!res.ok) {
-    const detail = await readError(res);
-    logGroup('Tutor HTTP error', [['status', res.status], ['detail', detail]]);
-    throwForStatus(res.status, detail);
-  }
-
-  let data: any;
-  try {
-    data = await res.json();
-  } catch {
-    throw new AiError('The provider returned an unreadable response.');
-  }
-
-  const choice = data?.choices?.[0];
-  const content: string = (choice?.message?.content ?? choice?.text ?? '').trim();
-  logGroup('Tutor reply', [
-    ['finish_reason', choice?.finish_reason ?? '(none)'],
-    ['length', content.length],
-  ]);
-
-  if (!content) {
-    const refusal = choice?.message?.refusal || data?.promptFeedback?.blockReason;
-    throw new AiError(
-      refusal
-        ? `The tutor couldn't answer that (${refusal}). Try rephrasing.`
-        : 'The tutor returned an empty reply. Try again.',
-    );
-  }
-  return sanitizeChatText(content);
-}
-
-/** Lightweight connectivity check used by the Settings "Test" button. */
-export async function testConnection(config: AiConfig): Promise<void> {
-  if (!config.apiKey) throw new AiError('Add your API key first.');
-  if (!config.baseUrl) throw new AiError('Set a base URL first.');
-  if (!config.model) throw new AiError('Choose a model first.');
-
-  let res: Response;
-  try {
-    res = await postChat(
-      config,
-      [{ role: 'user', content: 'Reply with the single word: ok' }],
-      { json: false, maxTokens: 5 },
-    );
-  } catch {
-    throw new AiError('Network error. Check your connection and base URL.');
-  }
-  if (!res.ok) {
-    throwForStatus(res.status, await readError(res));
-  }
 }

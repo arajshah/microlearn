@@ -224,6 +224,7 @@ export default function TodayScreen() {
       <View style={styles.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.greeting}>{greeting()}</Text>
+          <Text style={styles.eyebrow}>Observatory</Text>
           <Text style={styles.title}>Today</Text>
         </View>
         <Pressable onPress={() => router.push('/search')} hitSlop={8} style={styles.iconBtn}>
@@ -404,6 +405,14 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: font.size.sm,
     letterSpacing: 0.3,
+  },
+  eyebrow: {
+    color: colors.constellation,
+    fontSize: 10,
+    fontWeight: font.weight.bold as '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginTop: 2,
   },
   title: {
     color: colors.text,

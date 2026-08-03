@@ -8,11 +8,13 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { useReducedMotion } from '@/hooks/useReducedMotion';
 import {
   RoadmapLessonNode as LessonNode,
   RoadmapNodeStatus,
 } from '@/types/roadmap';
-import { colors, font, radius, spacing } from '@/theme/theme';
+import { NODE_STATUS_HINT, NODE_STATUS_LABEL } from '@/theme/cosmicNarrative';
+import { colors, font, motion, radius, spacing } from '@/theme/theme';
 
 interface Props {
   node: LessonNode;
@@ -23,40 +25,74 @@ interface Props {
 function statusStyle(status: RoadmapNodeStatus) {
   switch (status) {
     case 'completed':
-      return { bg: colors.successDark, border: colors.success, icon: 'checkmark' as const };
+      return {
+        bg: colors.successDark,
+        border: colors.success,
+        icon: 'sunny' as const,
+        ring: colors.signal,
+      };
     case 'active':
-      return { bg: colors.primaryDark, border: colors.primary, icon: 'play' as const };
+      return {
+        bg: colors.primaryDark,
+        border: colors.primary,
+        icon: 'navigate' as const,
+        ring: colors.constellation,
+      };
     case 'available':
-      return { bg: colors.surfaceAlt, border: colors.primary, icon: 'ellipse-outline' as const };
+      return {
+        bg: colors.surfaceAlt,
+        border: colors.constellation,
+        icon: 'ellipse-outline' as const,
+        ring: colors.border,
+      };
     case 'generating':
-      return { bg: colors.surfaceAlt, border: colors.textMuted, icon: 'hourglass' as const };
+      return {
+        bg: colors.surfaceAlt,
+        border: colors.textMuted,
+        icon: 'hourglass' as const,
+        ring: colors.borderSoft,
+      };
     case 'error':
-      return { bg: colors.dangerDark, border: colors.danger, icon: 'alert' as const };
+      return {
+        bg: colors.dangerDark,
+        border: colors.danger,
+        icon: 'alert' as const,
+        ring: colors.danger,
+      };
     default:
-      return { bg: colors.bgElevated, border: colors.borderSoft, icon: 'lock-closed' as const };
+      return {
+        bg: colors.bgElevated,
+        border: colors.borderSoft,
+        icon: 'lock-closed' as const,
+        ring: colors.borderSoft,
+      };
   }
 }
 
 export function RoadmapPathNode({ node, side, onPress }: Props) {
   const s = statusStyle(node.status);
-  // Locked/completed: preview only. Generating stays non-interactive per spec.
+  const reduceMotion = useReducedMotion();
   const tappable = node.status !== 'generating';
   const pulse = useSharedValue(1);
+  const statusLabel = NODE_STATUS_LABEL[node.status];
 
   useEffect(() => {
-    if (node.status === 'active') {
+    if (node.status === 'active' && !reduceMotion) {
       pulse.value = withRepeat(
-        withSequence(withTiming(1.06, { duration: 900 }), withTiming(1, { duration: 900 })),
+        withSequence(
+          withTiming(1.06, { duration: motion.pulse }),
+          withTiming(1, { duration: motion.pulse }),
+        ),
         -1,
         true,
       );
     } else {
       pulse.value = 1;
     }
-  }, [node.status, pulse]);
+  }, [node.status, pulse, reduceMotion]);
 
   const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: node.status === 'active' ? pulse.value : 1 }],
+    transform: [{ scale: node.status === 'active' && !reduceMotion ? pulse.value : 1 }],
   }));
 
   return (
@@ -64,6 +100,9 @@ export function RoadmapPathNode({ node, side, onPress }: Props) {
       <Pressable
         onPress={tappable ? onPress : undefined}
         disabled={!tappable}
+        accessibilityRole="button"
+        accessibilityLabel={`${node.title}, ${statusLabel}. ${NODE_STATUS_HINT[node.status]}`}
+        accessibilityState={{ disabled: !tappable }}
         style={({ pressed }) => [pressed && tappable && { opacity: 0.85 }]}
       >
         <Animated.View
@@ -75,9 +114,13 @@ export function RoadmapPathNode({ node, side, onPress }: Props) {
               opacity: node.status === 'locked' ? 0.55 : 1,
             },
             node.status === 'active' && styles.nodeActive,
+            node.status === 'completed' && styles.nodeCompleted,
             animStyle,
           ]}
         >
+          {node.status === 'active' || node.status === 'completed' ? (
+            <View style={[styles.orbitRing, { borderColor: `${s.ring}66` }]} />
+          ) : null}
           {node.status === 'generating' ? (
             <ActivityIndicator size="small" color={colors.textMuted} />
           ) : (
@@ -95,6 +138,16 @@ export function RoadmapPathNode({ node, side, onPress }: Props) {
           numberOfLines={2}
         >
           {node.title}
+        </Text>
+        <Text
+          style={[
+            styles.status,
+            node.status === 'completed' && { color: colors.success },
+            node.status === 'active' && { color: colors.primary },
+            node.status === 'error' && { color: colors.danger },
+          ]}
+        >
+          {statusLabel}
         </Text>
         <Text style={styles.meta}>{node.estimatedMinutes} min</Text>
       </View>
@@ -129,6 +182,20 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
+  nodeCompleted: {
+    shadowColor: colors.signal,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  orbitRing: {
+    position: 'absolute',
+    width: NODE + 10,
+    height: NODE + 10,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
   labelWrap: { maxWidth: '42%', gap: 2 },
   labelLeft: { marginLeft: spacing.md, alignItems: 'flex-start' },
   labelRight: { marginRight: spacing.md, alignItems: 'flex-end' },
@@ -138,5 +205,12 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold as '600',
   },
   labelMuted: { color: colors.textFaint },
+  status: {
+    color: colors.textFaint,
+    fontSize: 10,
+    fontWeight: font.weight.bold as '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
   meta: { color: colors.textFaint, fontSize: font.size.xs },
 });

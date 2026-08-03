@@ -349,10 +349,3 @@ export function getSerializedSource(
   }
   return serializeSourceDocument(row, includeText);
 }
-
-export function countSourceDocumentsForStatus(db: Db): Record<string, number> {
-  const rows = db
-    .prepare('SELECT status, COUNT(*) AS c FROM source_documents GROUP BY status')
-    .all() as Array<{ status: string; c: number }>;
-  return Object.fromEntries(rows.map((r) => [r.status, r.c]));
-}

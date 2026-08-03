@@ -235,7 +235,10 @@ export default function RetrieveScreen() {
       </GlassCard>
 
       <View style={styles.section}>
-        <SectionHeader title="Review Calendar" subtitle="See what is due this month." />
+        <SectionHeader
+          title="Review calendar"
+          subtitle="Objects in orbit — see what is due this month."
+        />
         <GlassCard accent={colors.retrieve} padding={spacing.md}>
           <MonthlyReviewCalendar
             monthDate={new Date()}

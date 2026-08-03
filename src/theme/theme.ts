@@ -1,26 +1,42 @@
+/**
+ * Microlearn design tokens — deep-space foundation for the cosmic learning universe.
+ * Prefer these tokens over hard-coded colors in screens and components.
+ */
+
 export const colors = {
-  bg: '#0A0F1A',
-  bgElevated: '#111827',
-  surface: '#1A2236',
-  surfaceAlt: '#222D45',
-  border: '#2A3654',
-  borderSoft: '#1E2940',
+  bg: '#070B14',
+  bgElevated: '#0E1524',
+  surface: '#162033',
+  surfaceAlt: '#1C2A42',
+  border: '#2A3A58',
+  borderSoft: '#1A2740',
 
-  text: '#F8FAFC',
-  textMuted: '#94A3B8',
-  textFaint: '#64748B',
+  /** Soft nebula wash for elevated panels */
+  nebula: '#1A2438',
+  atmosphere: '#121A2C',
 
-  primary: '#7C9CFF',
-  primaryDark: '#5B7AE8',
+  text: '#F4F7FC',
+  textMuted: '#9AA8C7',
+  textFaint: '#6B7A99',
 
-  success: '#34D399',
-  successDark: '#0F3D33',
+  primary: '#8BA4FF',
+  primaryDark: '#5B74D6',
+
+  success: '#3DDBA8',
+  successDark: '#0C322A',
   danger: '#F87171',
   dangerDark: '#3D1717',
   warning: '#FBBF24',
+  disabled: '#3A4660',
 
-  today: '#38BDF8',
-  retrieve: '#F59E0B',
+  /** Celestial highlights */
+  star: '#E8F0FF',
+  constellation: '#9EB6FF',
+  signal: '#5EEAD4',
+  horizon: '#C4B5FD',
+
+  today: '#56C4F5',
+  retrieve: '#F5A623',
   paths: '#A78BFA',
   create: '#C084FC',
   profile: '#34D399',
@@ -33,12 +49,16 @@ export const colors = {
 } as const;
 
 export const gradients = {
-  today: ['#38BDF8', '#2563EB'],
-  retrieve: ['#F59E0B', '#EA580C'],
-  paths: ['#A78BFA', '#6366F1'],
-  create: ['#C084FC', '#7C3AED'],
-  profile: ['#34D399', '#059669'],
-  calm: ['#111827', '#0A0F1A'],
+  today: ['#56C4F5', '#2563EB'] as [string, string],
+  retrieve: ['#F5A623', '#EA580C'] as [string, string],
+  paths: ['#A78BFA', '#4F46E5'] as [string, string],
+  create: ['#C084FC', '#7C3AED'] as [string, string],
+  profile: ['#34D399', '#059669'] as [string, string],
+  calm: ['#121A2C', '#070B14'] as [string, string],
+  cosmos: ['#121A2C', '#0A1020', '#070B14'] as [string, string, string],
+  nebulaViolet: ['#1A1630', '#0E1524'] as [string, string],
+  nebulaTeal: ['#10242C', '#0E1524'] as [string, string],
+  completion: ['#1A2438', '#0B1220'] as [string, string],
 } as const;
 
 export const spacing = {
@@ -90,8 +110,22 @@ export const shadow = {
   glow: {
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 18,
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
     elevation: 10,
   },
+  starGlow: {
+    shadowColor: colors.constellation,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+} as const;
+
+export const motion = {
+  fast: 160,
+  normal: 280,
+  slow: 480,
+  pulse: 900,
 } as const;

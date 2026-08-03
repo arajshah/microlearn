@@ -18,12 +18,13 @@ export function RoadmapUnitSection({ unit, onNodePress }: Props) {
   return (
     <View style={styles.section}>
       <View style={styles.unitHeader}>
+        <Text style={styles.sectorEyebrow}>Star system</Text>
         <Text style={styles.unitTitle}>{unit.title}</Text>
         <Text style={styles.unitDesc}>{unit.description}</Text>
         <View style={styles.unitProgress}>
-          <ProgressBar progress={pct} color={colors.primary} height={5} />
+          <ProgressBar progress={pct} color={colors.constellation} height={5} />
           <Text style={styles.unitProgressText}>
-            {done}/{lessons.length}
+            {done}/{lessons.length} illuminated
           </Text>
         </View>
       </View>
@@ -47,12 +48,19 @@ export function RoadmapUnitSection({ unit, onNodePress }: Props) {
 const styles = StyleSheet.create({
   section: { gap: spacing.md },
   unitHeader: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.nebula,
     borderRadius: radius.lg,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.borderSoft,
     gap: 4,
+  },
+  sectorEyebrow: {
+    color: colors.constellation,
+    fontSize: 10,
+    fontWeight: font.weight.bold as '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   unitTitle: {
     color: colors.text,
@@ -81,9 +89,10 @@ const styles = StyleSheet.create({
     left: '50%',
     top: spacing.md,
     bottom: spacing.md,
-    width: 3,
-    marginLeft: -1.5,
-    backgroundColor: colors.borderSoft,
+    width: 2,
+    marginLeft: -1,
+    backgroundColor: colors.constellation,
+    opacity: 0.35,
     borderRadius: radius.pill,
   },
 });

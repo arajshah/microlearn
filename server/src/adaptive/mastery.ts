@@ -25,7 +25,6 @@ const MISS_RATE = 0.3;
 const CONFIDENCE_HALF_LIFE = 4;
 const EVIDENCE_WINDOW = 6;
 const TREND_DELTA = 0.05;
-const DECAY_HALF_LIFE_DAYS = 60;
 
 export const WEAK_MASTERY_THRESHOLD = 0.5;
 export const REMEDIATION_SEVERITY_THRESHOLD = 0.6;
@@ -288,14 +287,6 @@ export function listConceptMastery(db: Db, filters: MasteryFilters = {}): Concep
     .prepare(`SELECT * FROM concept_mastery ${where} ORDER BY ${order} LIMIT ${limit}`)
     .all(params) as ConceptMasteryRow[];
   return rows.map(serializeMastery);
-}
-
-/** Mastery adjusted downward for time since last exposure; used for ranking only. */
-export function decayedMastery(mastery: ConceptMastery, now = new Date()): number {
-  if (!mastery.lastSeenAt) return mastery.masteryScore;
-  const days = (now.getTime() - new Date(mastery.lastSeenAt).getTime()) / 86_400_000;
-  if (!Number.isFinite(days) || days <= 0) return mastery.masteryScore;
-  return Number((mastery.masteryScore * Math.pow(0.5, days / DECAY_HALF_LIFE_DAYS)).toFixed(4));
 }
 
 export function getWeakConcepts(db: Db, limit = 10): ConceptMastery[] {

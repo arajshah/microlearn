@@ -32,20 +32,3 @@ export function stripReasoningWrappers(s: string): string {
 
   return out.trim();
 }
-
-/** Convert model markdown-ish output to clean mobile-friendly plain text. */
-export function sanitizeChatText(raw: string): string {
-  let s = stripReasoningWrappers(raw);
-
-  s = s.replace(/```[\w]*\n?([\s\S]*?)```/g, '$1');
-  s = s.replace(/^#{1,6}\s+/gm, '');
-  s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
-  s = s.replace(/\*([^*\n]+)\*/g, '$1');
-  s = s.replace(/__([^_]+)__/g, '$1');
-  s = s.replace(/_([^_\n]+)_/g, '$1');
-  s = s.replace(/`([^`]+)`/g, '$1');
-  s = s.replace(/^\s*[-*]\s+/gm, '• ');
-  s = s.replace(/\n{3,}/g, '\n\n');
-
-  return s.trim();
-}

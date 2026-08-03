@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,7 +14,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CardContent, Explanation, cardToSpeech, wasCardCorrect } from '@/components/CardView';
-import { TutorPanel } from '@/components/TutorPanel';
+import { TutorSheet } from '@/components/tutor/TutorSheet';
+import { useTutorConversation } from '@/components/tutor/useTutorConversation';
 import { useSpeech } from '@/hooks/useSpeech';
 import { isInteractiveCard, countGradedCards } from '@/utils/cards';
 import { useRoadmaps } from '@/context/RoadmapContext';
@@ -51,7 +53,7 @@ export default function LessonPlayer() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { completeLesson } = useProgress();
-  const { resolveLesson, getGenerated } = useLibrary();
+  const { resolveLesson, getGenerated, serverConfigured } = useLibrary();
   const { getRoadmapById, onRoadmapLessonCompleted } = useRoadmaps();
   const { ingestLesson } = useReview();
   const { isSaved, toggle } = useBookmarks();
@@ -61,6 +63,7 @@ export default function LessonPlayer() {
   const results = useRef<
     { cardIndex: number; cardId: string; correct: boolean; selected: number | null }[]
   >([]);
+  const tutorToggleLock = useRef(false);
 
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -146,6 +149,39 @@ export default function LessonPlayer() {
     return body ? `${header}\n${body}` : header;
   }, [location, card]);
 
+  const tutorCardLabel = useMemo(() => {
+    if (!card) return null;
+    if ('title' in card && typeof card.title === 'string' && card.title.trim()) {
+      return card.title.trim();
+    }
+    return `Card ${safeIndex + 1}`;
+  }, [card, safeIndex]);
+
+  // Conversation is scoped to the lesson session — card changes update context only.
+  const tutorConversation = useTutorConversation({
+    context: tutorContext,
+    serverConfigured,
+    sessionKey: lessonId ?? 'none',
+  });
+
+  const closeTutor = () => {
+    Keyboard.dismiss();
+    setTutorKeyboardUp(false);
+    setTutorOpen(false);
+  };
+
+  const toggleTutor = () => {
+    if (tutorToggleLock.current) return;
+    tutorToggleLock.current = true;
+    setTutorOpen((open) => {
+      if (open) setTutorKeyboardUp(false);
+      return !open;
+    });
+    requestAnimationFrame(() => {
+      tutorToggleLock.current = false;
+    });
+  };
+
   if (!location) {
     return (
       <View style={[styles.screen, styles.center]}>
@@ -164,14 +200,14 @@ export default function LessonPlayer() {
 
   const closeLesson = () => {
     stop();
-    setTutorOpen(false);
-    setTutorKeyboardUp(false);
+    closeTutor();
     router.back();
   };
 
   const finish = async () => {
     if (finishInFlight.current || finished) return;
     finishInFlight.current = true;
+    closeTutor();
     try {
       ingestLesson(
         lesson,
@@ -453,9 +489,11 @@ export default function LessonPlayer() {
           <Ionicons name="headset" size={18} color={colors.textMuted} />
         </Pressable>
         <Pressable
-          onPress={() => setTutorOpen((o) => !o)}
+          onPress={toggleTutor}
           hitSlop={10}
           style={[styles.askBtn, tutorOpen && { borderColor: subject.accent }]}
+          accessibilityRole="button"
+          accessibilityLabel={tutorOpen ? 'Close AI tutor' : 'Open AI tutor'}
         >
           <Ionicons name="sparkles" size={18} color={subject.accent} />
         </Pressable>
@@ -477,24 +515,19 @@ export default function LessonPlayer() {
           </ScrollView>
         </Animated.View>
 
-        {tutorOpen && tutorContext ? (
-          <TutorPanel
-            key={`${lesson.id}-${safeIndex}`}
-            context={tutorContext}
-            contextLabel={lesson.title}
-            accent={subject.accent}
-            variant="inline"
-            maxHeight={300}
-            onKeyboardChange={setTutorKeyboardUp}
-            onClose={() => {
-              setTutorKeyboardUp(false);
-              setTutorOpen(false);
-            }}
-          />
-        ) : null}
+        {/* Sheet overlays the lesson body; footer stays available to change cards. */}
+        <TutorSheet
+          visible={tutorOpen}
+          onClose={closeTutor}
+          conversation={tutorConversation}
+          contextLabel={lesson.title}
+          cardLabel={tutorCardLabel}
+          accent={subject.accent}
+          onKeyboardChange={setTutorKeyboardUp}
+        />
       </View>
 
-      {/* Bottom action — hide while typing in tutor so keyboard doesn't cover input */}
+      {/* Hide footer only while the tutor keyboard is up so the sheet owns that space. */}
       {!tutorKeyboardUp ? (
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
         {isQuestion && revealed ? (
@@ -584,10 +617,11 @@ function CompletionScreen({
       end={{ x: 1, y: 1 }}
       style={[styles.screen, styles.center, { padding: spacing.xl }]}
     >
-      <View style={styles.completionBadge}>
-        <Ionicons name="trophy" size={56} color={colors.white} />
+      <View style={[styles.completionBadge, { borderColor: `${subjectAccent}88` }]}>
+        <Ionicons name="planet" size={52} color={colors.white} />
       </View>
-      <Text style={styles.completionTitle}>Lesson complete!</Text>
+      <Text style={styles.completionEyebrow}>Destination illuminated</Text>
+      <Text style={styles.completionTitle}>Lesson complete</Text>
       <Text style={styles.completionLesson} numberOfLines={2}>
         {lessonTitle}
       </Text>
@@ -595,7 +629,7 @@ function CompletionScreen({
       <View style={styles.statRow}>
         <View style={styles.statBox}>
           <Text style={styles.statValue}>+{xp}</Text>
-          <Text style={styles.statLabel}>XP earned</Text>
+          <Text style={styles.statLabel}>Stellar energy</Text>
         </View>
         <View style={styles.statBox}>
           <Text style={styles.statValue}>{accuracy}%</Text>
@@ -692,7 +726,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  body: { flex: 1 },
+  body: { flex: 1, position: 'relative', overflow: 'hidden' },
 
   cardScroll: {
     padding: spacing.lg,
@@ -746,10 +780,19 @@ const styles = StyleSheet.create({
     width: 110,
     height: 110,
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
+  },
+  completionEyebrow: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 11,
+    fontWeight: font.weight.bold as '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
   },
   completionTitle: {
     color: colors.white,
