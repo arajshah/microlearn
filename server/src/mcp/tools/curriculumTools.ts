@@ -46,7 +46,7 @@ export function registerCurriculumTools(server: McpServer, ctx: ToolContext): vo
     'list_roadmaps',
     {
       title: 'List roadmaps',
-      description: 'List roadmap summaries. Excludes deleted by default; optional counts.',
+      description: 'List roadmap summaries. Excludes archived and deleted by default; optional counts.',
       inputSchema: S.listRoadmapsInput,
       annotations: { readOnlyHint: true },
     },

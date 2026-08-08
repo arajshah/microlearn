@@ -69,7 +69,7 @@ export function getRoadmap(db: Db, id: string) {
 
 /** Lists roadmap summaries, optionally filtered by status. */
 export function listRoadmaps(db: Db, status?: RoadmapStatus) {
-  const where = status ? 'WHERE roadmaps.status = ?' : "WHERE roadmaps.status != 'deleted'";
+  const where = status ? 'WHERE roadmaps.status = ?' : "WHERE roadmaps.status NOT IN ('archived', 'deleted')";
   const rows = db
     .prepare(
       `SELECT roadmaps.*,

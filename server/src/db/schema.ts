@@ -778,4 +778,138 @@ export const MIGRATIONS: readonly Migration[] = [
         WHERE status = 'active' AND lesson_node_id IS NOT NULL;
     `,
   },
+  {
+    id: '0012_curriculum_steward',
+    sql: `
+      CREATE TABLE IF NOT EXISTS curriculum_steward_charters (
+        id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL UNIQUE,
+        content TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_curriculum_steward_charter_active
+        ON curriculum_steward_charters(is_active)
+        WHERE is_active = 1;
+
+      CREATE TABLE IF NOT EXISTS curriculum_strategies (
+        id TEXT PRIMARY KEY,
+        strategy_version INTEGER NOT NULL UNIQUE,
+        summary TEXT NOT NULL,
+        current_phase TEXT NOT NULL,
+        priorities_json TEXT NOT NULL DEFAULT '[]',
+        deprioritized_areas_json TEXT NOT NULL DEFAULT '[]',
+        active_hypotheses_json TEXT NOT NULL DEFAULT '[]',
+        near_term_objectives_json TEXT NOT NULL DEFAULT '[]',
+        upcoming_plan_json TEXT NOT NULL DEFAULT '[]',
+        concerns_json TEXT NOT NULL DEFAULT '[]',
+        last_reviewed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_curriculum_strategies_version
+        ON curriculum_strategies(strategy_version DESC);
+
+      CREATE TABLE IF NOT EXISTS curriculum_steward_runs (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT UNIQUE,
+        actor TEXT NOT NULL,
+        status TEXT NOT NULL,
+        strategy_version_before INTEGER,
+        strategy_version_after INTEGER,
+        summary TEXT,
+        actions_json TEXT NOT NULL DEFAULT '[]',
+        error_code TEXT,
+        error_message TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_curriculum_steward_one_running
+        ON curriculum_steward_runs(status)
+        WHERE status = 'running';
+
+      CREATE INDEX IF NOT EXISTS idx_curriculum_steward_runs_recent
+        ON curriculum_steward_runs(started_at DESC);
+
+      INSERT OR IGNORE INTO curriculum_steward_charters
+        (id, version, content, is_active, created_at, updated_at)
+      VALUES (
+        'default-curriculum-steward-charter',
+        1,
+        'Microlearn Curriculum Steward
+
+Mission:
+Guide the learner toward exceptional AI/ML scientist-engineer capability by May 2028.
+
+Optimize for genuine mastery, technical depth, research ability, empirical judgment, and serious software-building ability rather than content volume, streak optimization, or superficial completion.
+
+Core learning areas include:
+- mathematics and statistical foundations
+- classical machine learning
+- deep learning
+- modern foundation models
+- reasoning
+- world models
+- grounded intelligent systems and agents
+- ML systems
+- evaluation and reliability
+- experimental methodology
+- deep paper reading and reproduction
+- serious implementation work
+- original defensible research
+
+Learning philosophy:
+- Favor active work over passive consumption.
+- Approximately 70% of learning effort should involve implementation, experimentation, retrieval, problem solving, evaluation, reproduction, or research.
+- Maintain continuity across lessons and roadmaps.
+- Revisit weak concepts rather than merely progressing forward.
+- Prefer depth when a topic is strategically important.
+- Use prerequisite-aware progression.
+- Keep the curriculum challenging but sustainable.
+- Do not generate material merely to keep the application busy.
+
+Autonomy:
+The Curriculum Steward may create, publish, reorder, revise, archive, or retire curriculum when justified by the learner''s state.
+
+Safety:
+- Never delete learning history.
+- Never delete mastery records.
+- Never delete review history.
+- Never delete achievements.
+- Never delete audit history.
+- Never silently rewrite completed lessons.
+- Preserve completed curriculum as historical evidence.
+- Prefer archival over permanent deletion.
+- Permanent deletion is appropriate only for unused drafts, exact duplicates, malformed generated content, or clearly abandoned zero-progress material.
+
+Decision policy:
+A steward run is allowed to make no changes.
+Do not manufacture interventions when the existing learning plan remains appropriate.
+
+Every meaningful curriculum change should leave a concise audit rationale.',
+        1,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      );
+
+      INSERT OR IGNORE INTO curriculum_strategies
+        (id, strategy_version, summary, current_phase, priorities_json,
+         deprioritized_areas_json, active_hypotheses_json, near_term_objectives_json,
+         upcoming_plan_json, concerns_json, last_reviewed_at, created_at, updated_at)
+      VALUES (
+        'initial-curriculum-strategy',
+        1,
+        'Establish and continuously refine a rigorous AI/ML mastery curriculum.',
+        'Establish and continuously refine a rigorous AI/ML mastery curriculum.',
+        '[]', '[]', '[]', '[]', '[]', '[]',
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      );
+    `,
+  },
 ];

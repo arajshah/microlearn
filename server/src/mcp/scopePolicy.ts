@@ -15,7 +15,8 @@ export type McpTargetResourceType =
   | 'diagnostic'
   | 'automation_grant'
   | 'automation_schedule'
-  | 'reminder';
+  | 'reminder'
+  | 'curriculum_steward';
 
 export interface McpToolPolicy {
   requiredScopes: McpScope[];
@@ -71,6 +72,10 @@ const READ_TOOL_NAMES: ReadonlySet<string> = new Set([
   'get_trusted_automation_status',
   'list_automation_schedules',
   'list_automation_reminders',
+  'get_curriculum_steward_state',
+  'get_curriculum_steward_charter',
+  'get_curriculum_strategy',
+  'get_recent_curriculum_steward_runs',
 ]);
 
 const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
@@ -125,6 +130,11 @@ const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'pause_automation_reminder',
   'resume_automation_reminder',
   'delete_automation_reminder',
+  'update_curriculum_steward_charter',
+  'update_curriculum_strategy',
+  'begin_curriculum_steward_run',
+  'complete_curriculum_steward_run',
+  'fail_curriculum_steward_run',
 ]);
 
 // Existing confirmation-protected actions plus direct repository/git mutation.
@@ -231,6 +241,16 @@ classify(['create_automation_schedule', 'update_automation_schedule', 'pause_aut
 classify(['create_automation_reminder', 'update_automation_reminder', 'pause_automation_reminder', 'resume_automation_reminder', 'delete_automation_reminder'], {
   capability: 'reminder.write', targetResourceType: 'reminder', trustedAutomationAllowed: true,
   exceptionalConfirmationRequired: false, auditCategory: 'reminder',
+});
+classify([
+  'update_curriculum_steward_charter',
+  'update_curriculum_strategy',
+  'begin_curriculum_steward_run',
+  'complete_curriculum_steward_run',
+  'fail_curriculum_steward_run',
+], {
+  capability: 'roadmap.write', targetResourceType: 'curriculum_steward', trustedAutomationAllowed: true,
+  exceptionalConfirmationRequired: false, auditCategory: 'curriculum_steward',
 });
 classify(['export_curriculum_backup', 'export_sqlite_backup'], {
   targetResourceType: 'server', trustedAutomationAllowed: false,

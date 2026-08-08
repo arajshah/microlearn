@@ -23,6 +23,7 @@ import { registerRetrievalTools } from './tools/retrievalTools';
 import { registerGamificationTools } from './tools/gamificationTools';
 import { registerAdaptiveTools } from './tools/adaptiveTools';
 import { registerAutomationTools } from './tools/automationTools';
+import { registerStewardTools } from './tools/stewardTools';
 import { getMcpAuthContext, sendMcpInsufficientScope } from '../auth/mcpAuth';
 import { missingMcpScopes, requiredScopesForMcpRequest } from './scopePolicy';
 import { preauthorizeTrustedMutations } from './trustedAuthorization';
@@ -54,6 +55,7 @@ function buildMcpServer(ctx: ToolContext): McpServer {
   registerGamificationTools(server, ctx);
   registerAdaptiveTools(server, ctx);
   registerAutomationTools(server, ctx);
+  registerStewardTools(server, ctx);
 
   return server;
 }

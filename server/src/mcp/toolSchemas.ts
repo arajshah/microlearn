@@ -109,6 +109,16 @@ export const TOOL_CATALOG: ReadonlyArray<{ name: string; description: string }> 
   { name: 'pause_automation_reminder', description: 'Pause a reminder.' },
   { name: 'resume_automation_reminder', description: 'Resume a reminder.' },
   { name: 'delete_automation_reminder', description: 'Delete a reminder after structured confirmation.' },
+  // External Curriculum Steward state and lifecycle. Scheduling remains outside this repository.
+  { name: 'get_curriculum_steward_state', description: 'Return a bounded aggregate curriculum and learning-state snapshot.' },
+  { name: 'get_curriculum_steward_charter', description: 'Return the active versioned Curriculum Steward charter.' },
+  { name: 'update_curriculum_steward_charter', description: 'Create a new active charter version.' },
+  { name: 'get_curriculum_strategy', description: 'Return the latest persistent curriculum strategy.' },
+  { name: 'update_curriculum_strategy', description: 'Create a new structured curriculum strategy version.' },
+  { name: 'get_recent_curriculum_steward_runs', description: 'Return bounded recent Curriculum Steward run summaries.' },
+  { name: 'begin_curriculum_steward_run', description: 'Begin one idempotency-aware Curriculum Steward run.' },
+  { name: 'complete_curriculum_steward_run', description: 'Complete a run as completed or no_change.' },
+  { name: 'fail_curriculum_steward_run', description: 'Record a safe failed-run summary.' },
 ];
 
 export const TOOL_COUNT = TOOL_CATALOG.length;

@@ -153,7 +153,7 @@ export function listRoadmaps(db: Db, options: ListRoadmapsOptions = {}) {
       ? ''
       : status
         ? 'WHERE roadmaps.status = ?'
-        : "WHERE roadmaps.status != 'deleted'";
+        : "WHERE roadmaps.status NOT IN ('archived', 'deleted')";
   const rows = db
     .prepare(
       `SELECT roadmaps.*,
@@ -378,11 +378,20 @@ export function updateRoadmap(db: Db, roadmapId: string, patch: UpdateRoadmapPat
     const wantsPublish = patch.status === 'published';
     const metadataKeys = Object.keys(patch).filter((k) => k !== 'status');
     const onlyArchiving = patch.status === 'archived' && metadataKeys.length === 0;
+    const completedCount = (db.prepare(
+      "SELECT COUNT(*) AS count FROM lesson_nodes WHERE roadmap_id = ? AND status = 'completed'",
+    ).get(roadmapId) as { count: number }).count;
 
     if (existing.status === 'published' && !onlyArchiving) {
       throw new ToolError(
         'ROADMAP_NOT_EDITABLE',
         'Published roadmaps cannot be edited directly (only archived). Use rollback or publish a new version.',
+      );
+    }
+    if (completedCount > 0 && metadataKeys.length > 0) {
+      throw new ToolError(
+        'COMPLETED_CURRICULUM_IMMUTABLE',
+        'Roadmap metadata with completed lessons is historical evidence and cannot be rewritten. Archive it or create a superseding roadmap instead.',
       );
     }
 
@@ -533,6 +542,34 @@ function safeParseArray(raw: string): string[] {
   }
 }
 
+function assertLessonNodeHasNoLearningHistory(db: Db, node: LessonNodeRow): void {
+  const row = db.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM progress_events
+        WHERE lesson_node_id = @nodeId
+           OR lesson_id IN (SELECT id FROM generated_lessons WHERE lesson_node_id = @nodeId))
+       + (SELECT COUNT(*) FROM lesson_outcomes WHERE lesson_node_id = @nodeId)
+       + (SELECT COUNT(*) FROM learning_events
+          WHERE lesson_node_id = @nodeId
+             OR lesson_id IN (SELECT id FROM generated_lessons WHERE lesson_node_id = @nodeId))
+       + (SELECT COUNT(*) FROM retrieval_items
+          WHERE lesson_node_id = @nodeId
+             OR lesson_id IN (SELECT id FROM generated_lessons WHERE lesson_node_id = @nodeId))
+       + (SELECT COUNT(*) FROM review_sets
+          WHERE lesson_node_id = @nodeId
+             OR lesson_id IN (SELECT id FROM generated_lessons WHERE lesson_node_id = @nodeId))
+       + (SELECT COUNT(*) FROM lesson_concepts WHERE lesson_node_id = @nodeId)
+         AS evidenceCount`,
+  ).get({ nodeId: node.id }) as { evidenceCount: number };
+
+  if (node.status === 'completed' || row.evidenceCount > 0) {
+    throw new ToolError(
+      'LESSON_HISTORY_PRESERVED',
+      'This lesson has learner progress or historical evidence and cannot be destructively changed. Archive its roadmap or create a superseding future lesson instead.',
+    );
+  }
+}
+
 export function createLessonNode(
   db: Db,
   input: {
@@ -616,6 +653,15 @@ export function updateLessonNode(
     requireEditableRow(db, input.roadmapId);
     const node = db.prepare('SELECT * FROM lesson_nodes WHERE id = ? AND roadmap_id = ?').get(input.lessonNodeId, input.roadmapId) as LessonNodeRow | undefined;
     if (!node) throw notFound(`Lesson node "${input.lessonNodeId}" not found in roadmap.`);
+    if (node.status === 'completed') {
+      const isCompletedNoop = Object.keys(input.patch).length === 1 && input.patch.status === 'completed';
+      if (!isCompletedNoop) {
+        throw new ToolError(
+          'COMPLETED_LESSON_IMMUTABLE',
+          'Completed lesson nodes are historical evidence and cannot be rewritten. Create a superseding future lesson instead.',
+        );
+      }
+    }
 
     const allNodes = loadNodes(db, input.roadmapId);
     const idSet = new Set(allNodes.map((n) => n.id));
@@ -706,6 +752,7 @@ export function deleteLessonNode(
     requireEditableRow(db, input.roadmapId);
     const node = db.prepare('SELECT * FROM lesson_nodes WHERE id = ? AND roadmap_id = ?').get(input.lessonNodeId, input.roadmapId) as LessonNodeRow | undefined;
     if (!node) throw notFound(`Lesson node "${input.lessonNodeId}" not found in roadmap.`);
+    assertLessonNodeHasNoLearningHistory(db, node);
 
     const dependents = loadNodes(db, input.roadmapId).filter((n) =>
       safeParseArray(n.prerequisite_ids_json).includes(input.lessonNodeId),
@@ -769,6 +816,15 @@ export function reorderLessonNodes(
       input.orderedLessonNodeIds.forEach((id, i) => newOrderIndex.set(id, i));
     }
 
+    for (const node of nodes) {
+      if (node.status === 'completed' && newOrderIndex.get(node.id) !== node.node_order) {
+        throw new ToolError(
+          'COMPLETED_LESSON_IMMUTABLE',
+          'Reordering cannot move completed lesson nodes. Reorder only the remaining future curriculum.',
+        );
+      }
+    }
+
     for (const [id, order] of newOrderIndex) {
       db.prepare('UPDATE lesson_nodes SET node_order = ?, updated_at = ? WHERE id = ?').run(order, now(), id);
     }
@@ -807,8 +863,9 @@ export function createLessonBlueprint(
 ) {
   const tx = db.transaction(() => {
     requireRow(db, input.roadmapId);
-    const node = db.prepare('SELECT id FROM lesson_nodes WHERE id = ? AND roadmap_id = ?').get(input.lessonNodeId, input.roadmapId);
+    const node = db.prepare('SELECT * FROM lesson_nodes WHERE id = ? AND roadmap_id = ?').get(input.lessonNodeId, input.roadmapId) as LessonNodeRow | undefined;
     if (!node) throw notFound(`Lesson node "${input.lessonNodeId}" not found in roadmap.`);
+    assertLessonNodeHasNoLearningHistory(db, node);
     assertBlueprintShape(input.blueprint);
 
     const ts = now();
@@ -840,6 +897,8 @@ export function updateLessonBlueprint(
   const tx = db.transaction(() => {
     const existing = db.prepare('SELECT * FROM lesson_blueprints WHERE id = ?').get(input.blueprintId) as BlueprintRow | undefined;
     if (!existing) throw notFound(`Blueprint "${input.blueprintId}" not found.`);
+    const node = db.prepare('SELECT * FROM lesson_nodes WHERE id = ?').get(existing.lesson_node_id) as LessonNodeRow | undefined;
+    if (node) assertLessonNodeHasNoLearningHistory(db, node);
     assertBlueprintShape(input.blueprint);
 
     // Versioned insert (new row) rather than destructive overwrite.
@@ -897,8 +956,9 @@ export function createLesson(
 ) {
   const tx = db.transaction(() => {
     requireRow(db, input.roadmapId);
-    const node = db.prepare('SELECT id FROM lesson_nodes WHERE id = ? AND roadmap_id = ?').get(input.lessonNodeId, input.roadmapId);
+    const node = db.prepare('SELECT * FROM lesson_nodes WHERE id = ? AND roadmap_id = ?').get(input.lessonNodeId, input.roadmapId) as LessonNodeRow | undefined;
     if (!node) throw notFound(`Lesson node "${input.lessonNodeId}" not found in roadmap.`);
+    assertLessonNodeHasNoLearningHistory(db, node);
     assertLessonShape(input.lesson);
 
     const ts = now();
@@ -941,6 +1001,10 @@ export function updateLesson(
   const tx = db.transaction(() => {
     const existing = db.prepare('SELECT * FROM generated_lessons WHERE id = ?').get(input.lessonId) as GeneratedLessonRow | undefined;
     if (!existing) throw notFound(`Generated lesson "${input.lessonId}" not found.`);
+    if (existing.lesson_node_id) {
+      const node = db.prepare('SELECT * FROM lesson_nodes WHERE id = ?').get(existing.lesson_node_id) as LessonNodeRow | undefined;
+      if (node) assertLessonNodeHasNoLearningHistory(db, node);
+    }
     assertLessonShape(input.lesson);
 
     const ts = now();
