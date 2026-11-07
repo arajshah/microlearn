@@ -105,10 +105,11 @@ src/
   context/                # Progress, Library (AI), Review (SRS), Challenge,
                           #   Bookmarks, Preferences (onboarding/interests/level)
   data/                   # Course content + achievements + daily-challenge builder
-    economics.ts
-    philosophy.ts
-    literature.ts
-    computerScience.ts
+    achievements.ts
+    challenge.ts
+    courses.ts
+    mastery.ts
+    subjects.ts
   hooks/                  # useSpeech (text-to-speech)
   notifications/          # Daily reminder scheduling (expo-notifications)
   srs/                    # Spaced-repetition scheduler (SM-2-style)
