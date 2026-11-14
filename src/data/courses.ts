@@ -1,3 +1,8 @@
+/**
+ * Compatibility re-exports for the old static course data module.
+ * Built-in lessons were removed in favour of AI-generated lessons, so the
+ * lesson lookups below are kept only as deprecated stubs that return empty.
+ */
 export { subjects, getSubject, subjectProgressFromCompleted } from '@/data/subjects';
 export { lessonXp } from '@/utils/lessonXp';
 

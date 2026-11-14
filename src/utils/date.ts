@@ -1,3 +1,7 @@
+/**
+ * Small date helpers: local day keys (YYYY-MM-DD), day arithmetic, and a
+ * time-of-day greeting used across the app.
+ */
 /** Returns a local YYYY-MM-DD key for a given date (defaults to now). */
 export function dayKey(d: Date = new Date()): string {
   const y = d.getFullYear();

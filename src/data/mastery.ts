@@ -1,3 +1,7 @@
+/**
+ * Learner mastery scale (1 = brand new, 5 = expert) and the lesson sizing
+ * tiers it drives: card counts, durations, and depth of explanation.
+ */
 /** Learner mastery scale (1 = brand new, 5 = expert). */
 export type MasteryLevel = 1 | 2 | 3 | 4 | 5;
 

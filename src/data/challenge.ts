@@ -1,3 +1,8 @@
+/**
+ * Daily challenge builder: picks a stable, date-seeded set of mixed
+ * questions from the learner's generated lessons, round-robin across
+ * subjects so one subject never dominates the set.
+ */
 import { CardRef, QuizCard, SubjectId, TrueFalseCard, FillBlankCard } from '@/types/content';
 import { GeneratedLesson } from '@/types/content';
 import { getSubject } from '@/data/subjects';

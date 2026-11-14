@@ -1,3 +1,7 @@
+/**
+ * Mastery recommendation: nudge the learner's self-reported mastery level
+ * up or down based on how much of the subject they have already completed.
+ */
 import { MasteryLevel } from '@/data/mastery';
 
 /**

@@ -1,3 +1,7 @@
+/**
+ * XP earned for completing a lesson: a base award plus a per-card bonus
+ * for each graded card in the lesson.
+ */
 import { Lesson } from '@/types/content';
 import { countGradedCards } from '@/utils/cards';
 

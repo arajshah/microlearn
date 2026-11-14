@@ -1,3 +1,8 @@
+/**
+ * Local fallback achievement badges, derived from the learner's progress
+ * snapshot (completed lessons, XP, streaks). Used when server achievements
+ * are unavailable; badge IDs are preserved so progress stays consistent.
+ */
 import { Ionicons } from '@expo/vector-icons';
 import { CompletedLesson } from '@/context/ProgressContext';
 import { SubjectId } from '@/types/content';

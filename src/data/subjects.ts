@@ -1,3 +1,7 @@
+/**
+ * Module: the subject catalogue shown in the Create UI, plus helpers to
+ * look a subject up and measure progress within it.
+ */
 import { Subject, SubjectId } from '@/types/content';
 
 /** Subject taxonomy for Create UI — no built-in lesson content. */
