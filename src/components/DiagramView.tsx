@@ -1,3 +1,5 @@
+// Renders lesson diagrams (flow diagrams) with the app theme.
+
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { LessonDiagram } from '@/types/diagram';
