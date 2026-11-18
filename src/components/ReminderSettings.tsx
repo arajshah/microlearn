@@ -1,3 +1,5 @@
+// Reminder preferences: enabling, disabling, and scheduling study reminders.
+
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
