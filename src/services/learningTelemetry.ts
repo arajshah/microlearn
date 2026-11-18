@@ -1,3 +1,5 @@
+// Records learning events (card interactions and concept tags) to local storage.
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LessonCard } from '@/types/content';
 import {
