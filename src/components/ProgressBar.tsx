@@ -1,3 +1,5 @@
+// Thin progress bar showing lesson progress from 0 to 1.
+
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { colors, radius } from '@/theme/theme';
