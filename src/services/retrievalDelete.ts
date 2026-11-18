@@ -1,3 +1,5 @@
+// Removes saved retrieval items and review sets from the server.
+
 import {
   deleteRetrievalItem,
   deleteReviewSet,
