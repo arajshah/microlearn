@@ -1,3 +1,5 @@
+// Panel showing the learner's current learning state and progress.
+
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
