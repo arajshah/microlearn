@@ -1,3 +1,4 @@
+// Concept, skill, and weakness tags for lesson cards, with adaptive-learning fallbacks.
 import { CognitiveLevel, EstimatedDifficulty, LessonCard } from '@/types/content';
 
 const STOPWORDS = new Set([
