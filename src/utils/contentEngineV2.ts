@@ -1,3 +1,4 @@
+// Lesson content engine: repairs and normalizes generated cards into valid lessons.
 import { ExplanationCard, LessonCard } from '@/types/content';
 import { normalizeConceptSlug } from '@/utils/conceptTags';
 
