@@ -1,3 +1,4 @@
+// Lesson quality checks: validates repaired lessons against slide-count and coverage rules.
 import { GeneratedLesson, LessonCard } from '@/types/content';
 import {
   ensureUniqueSlideTitles,
