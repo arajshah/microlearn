@@ -1,3 +1,4 @@
+// Lesson continuity: builds generation context from prior lessons and summarizes outcomes.
 import { GeneratedRoadmap } from '@/types/roadmap';
 import { LessonGenerationContext } from '@/types/lessonGeneration';
 import { LessonOutcome, LessonMistake } from '@/types/lessonOutcome';
