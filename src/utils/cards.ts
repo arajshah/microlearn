@@ -1,3 +1,4 @@
+// Card helpers: which lesson cards are interactive or graded, and how to grade them.
 import {
   LessonCard,
   MatchingCard,
