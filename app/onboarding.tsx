@@ -1,3 +1,5 @@
+// Onboarding screen: first-run setup that picks subjects and starting levels.
+
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
