@@ -1,3 +1,5 @@
+// Diagnostic screen: opening assessment that seeds mastery and awards XP.
+
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
